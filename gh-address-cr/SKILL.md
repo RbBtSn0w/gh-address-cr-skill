@@ -21,11 +21,18 @@ Use this skill in strict incremental mode to minimize token usage while keeping 
 1. Run incremental triage first:
    - `scripts/run_once.sh [--audit-id <id>] <owner/repo> <pr_number>`
 2. Process only unresolved + unhandled threads.
-3. For each thread: `understand -> verify -> act -> evidence reply -> resolve/keep-open`.
+3. For each thread: `understand -> analyze/decide (Accept/Defer/Clarify) -> act (fix code OR write rationale) -> evidence reply -> resolve`. (Note: You MUST resolve the thread on GitHub after replying to pass the final gate).
 4. Use minimal fixes and targeted tests first.
 5. Before completion message, run hard gate (MANDATORY):
    - `scripts/final_gate.sh [--auto-clean|--no-auto-clean] [--audit-id <id>] <owner/repo> <pr_number>`
 6. Only if gate passes, send merge-readiness summary.
+
+## Decision Matrix (Analysis Phase)
+
+Before modifying code, you MUST analyze the necessity of the CR suggestion:
+- **Accept (Bug/Logic Error):** If the suggestion identifies a real issue or valid improvement with low architectural cost -> Proceed to fix code and generate evidence.
+- **Defer (Nit/Preference with high cost):** If it's a stylistic preference requiring massive refactoring or architectural decay -> Do not change code. Use `scripts/generate_reply.sh --mode defer` to generate the trade-off explanation.
+- **Clarify (Question/Misunderstanding):** If the reviewer misunderstood the logic or asks a question -> Do not change code. Use `scripts/generate_reply.sh --mode clarify` to generate the technical rationale.
 
 ## Hard Constraints (No Bypass)
 
@@ -43,12 +50,10 @@ Any final completion message must include:
 3. unresolved count = 0 confirmation
 4. audit summary path + sha256
 
-## Mandatory Evidence (Short Form)
+## Mandatory Evidence & Rationale
 
-- Commit: `<hash>`
-- Files: `<file1,file2>`
-- Validation: `<test command>` + `<result>`
-- Never resolve a thread without these 3 items.
+- **If Accepted (Code Changed):** Provide Commit `<hash>`, Files `<file1,file2>`, and Validation `<test command>` + `<result>`. Never resolve an accepted thread without these 3 items.
+- **If Deferred/Clarified (No Code Changed):** Provide a detailed, professional Rationale explaining why the code remains as is (e.g., architectural constraints, pointing out misunderstood logic).
 
 ## Must-Fix Rule
 
@@ -69,7 +74,7 @@ Any final completion message must include:
 - Resolve thread: `scripts/resolve_thread.sh [--dry-run] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_id>`
 - Mark handled without resolving: `scripts/mark_handled.sh [--repo <owner/repo> --pr <number>] <thread_id>`
 - Batch resolve from file: `scripts/batch_resolve.sh [--dry-run] [--yes] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_ids_file>`
-- Generate fixed-reply draft: `scripts/reply_fixed.sh [--severity P1|P2|P3] <output_md> <commit_hash> <files_csv> <test_command> <test_result> [why]`
+- Generate reply draft: `scripts/generate_reply.sh [--mode fix|clarify|defer] [--severity P1|P2|P3] <output_md> [args...]`
 - Clean local cache: `scripts/clean_state.sh [--repo <owner/repo> --pr <number> | --all] [--clean-tmp]`
 - Audit report: `scripts/audit_report.sh <owner/repo> <pr_number>`
 - Templates: `assets/reply-templates/`
@@ -78,14 +83,18 @@ Any final completion message must include:
 ## Fast Path
 
 1. `scripts/run_once.sh --audit-id run-20260324 github/spec-kit 1906` to get unresolved threads excluding already-handled IDs.
-2. Generate reply draft:
-   - `scripts/reply_fixed.sh --severity P2 /tmp/reply.md <commit> "<file1,file2>" "<test_cmd>" "<result>" "<why>"`
-3. Preview:
+2. **Analyze**: Decide whether to Accept, Defer, or Clarify.
+3. Generate reply draft:
+   - If Accepted (Code changed): `scripts/generate_reply.sh --mode fix --severity P2 /tmp/reply.md <commit> "<file1,file2>" "<test_cmd>" "<result>" "<why>"`
+   - If Clarified (No code changed): `scripts/generate_reply.sh --mode clarify /tmp/reply.md "<detailed rationale why current logic is correct>"`
+   - If Deferred (No code changed): `scripts/generate_reply.sh --mode defer /tmp/reply.md "<detailed rationale why this is deferred>"`
+4. Preview:
    - `scripts/post_reply.sh --dry-run <thread_id> /tmp/reply.md`
-4. Execute:
+5. Execute:
    - `scripts/post_reply.sh --repo github/spec-kit --pr 1906 --audit-id run-20260324 <thread_id> /tmp/reply.md`
    - `scripts/resolve_thread.sh --repo github/spec-kit --pr 1906 --audit-id run-20260324 <thread_id>`
-5. Hard gate before completion:
+6. Hard gate before completion:
    - `scripts/final_gate.sh --auto-clean --audit-id run-20260324 github/spec-kit 1906`
 
 State cache lives in a user cache directory by default (override with `GH_ADDRESS_CR_STATE_DIR`) to avoid repeated labor across rounds. If the cache is purged, the workflow can be rebuilt from GitHub thread state; the main downside is potential repeated work.
+ by default (override with `GH_ADDRESS_CR_STATE_DIR`) to avoid repeated labor across rounds. If the cache is purged, the workflow can be rebuilt from GitHub thread state; the main downside is potential repeated work.
