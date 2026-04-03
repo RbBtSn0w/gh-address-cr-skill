@@ -1,3 +1,10 @@
+## [1.1.0](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.0.0...v1.1.0) (2026-04-03)
+
+### Features
+
+* enhance reply generation with new clarify mode and remove deprecated reply_fixed script ([55a4396](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/55a439641fe5b5b9f355127af15cac4320d8f09e))
+* expand README with detailed core workflow diagram for PR review resolution ([ed57cd9](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/ed57cd956428b0a384ed74b5ecf500056ef0381c))
+
 ## 1.0.0 (2026-03-24)
 
 ### Features
