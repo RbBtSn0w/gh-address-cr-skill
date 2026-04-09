@@ -75,12 +75,12 @@ run_resolve() {
   "${cmd[@]}"
 }
 
-tid=""
-while IFS= read -r tid || [[ -n "$tid" ]]; do
-  [[ "$tid" =~ ^[[:space:]]*$ ]] && continue
-  [[ "$tid" =~ ^[[:space:]]*# ]] && continue
-  if [[ ! "$tid" =~ ^[[:space:]]*APPROVED[[:space:]]+([^[:space:]]+)[[:space:]]*$ ]]; then
-    echo "Invalid line in approved list: '$tid'" >&2
+line=""
+while IFS= read -r line || [[ -n "$line" ]]; do
+  [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+  [[ "$line" =~ ^[[:space:]]*# ]] && continue
+  if [[ ! "$line" =~ ^[[:space:]]*APPROVED[[:space:]]+([^[:space:]]+)[[:space:]]*$ ]]; then
+    echo "Invalid line in approved list: '$line'" >&2
     echo "Expected format: APPROVED <thread_id>" >&2
     exit 2
   fi
