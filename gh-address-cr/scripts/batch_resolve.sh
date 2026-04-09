@@ -75,6 +75,7 @@ run_resolve() {
   "${cmd[@]}"
 }
 
+tid=""
 while IFS= read -r tid || [[ -n "$tid" ]]; do
   [[ "$tid" =~ ^[[:space:]]*$ ]] && continue
   [[ "$tid" =~ ^[[:space:]]*# ]] && continue
