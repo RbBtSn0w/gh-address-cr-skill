@@ -33,7 +33,11 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --help|-h)
-      echo "Usage: $0 [--dry-run] [--yes] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_ids_file>"
+      echo "Usage: $0 [--dry-run] [--yes] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <approved_threads_file>"
+      echo
+      echo "Approved list format (breaking change):"
+      echo "  - One approved thread per line: APPROVED <thread_id>"
+      echo "  - Empty lines and # comments are allowed"
       exit 0
       ;;
     *)
@@ -43,13 +47,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ $# -ne 1 ]]; then
-  echo "Usage: $0 [--dry-run] [--yes] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_ids_file>" >&2
+  echo "Usage: $0 [--dry-run] [--yes] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <approved_threads_file>" >&2
   exit 1
 fi
 
-thread_file="$1"
-if [[ ! -f "$thread_file" ]]; then
-  echo "Thread id file not found: $thread_file" >&2
+approved_file="$1"
+if [[ ! -f "$approved_file" ]]; then
+  echo "Approved thread file not found: $approved_file" >&2
   exit 1
 fi
 
@@ -58,16 +62,28 @@ if [[ "$dry_run" == false && "$yes" == false ]]; then
   exit 1
 fi
 
-while IFS= read -r tid; do
-  [[ -z "$tid" ]] && continue
-  [[ "$tid" =~ ^# ]] && continue
-  extra_args=()
-  if [[ -n "$repo" && -n "$pr_number" ]]; then
-    extra_args+=(--repo "$repo" --pr "$pr_number" --audit-id "$audit_id")
-  fi
+run_resolve() {
+  local tid="$1"
+  local cmd=(bash "$resolve_script")
   if [[ "$dry_run" == true ]]; then
-    bash "$resolve_script" --dry-run "${extra_args[@]}" "$tid"
-  else
-    bash "$resolve_script" "${extra_args[@]}" "$tid"
+    cmd+=(--dry-run)
   fi
-done < "$thread_file"
+  if [[ -n "$repo" && -n "$pr_number" ]]; then
+    cmd+=(--repo "$repo" --pr "$pr_number" --audit-id "$audit_id")
+  fi
+  cmd+=("$tid")
+  "${cmd[@]}"
+}
+
+line=""
+while IFS= read -r line || [[ -n "$line" ]]; do
+  [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+  [[ "$line" =~ ^[[:space:]]*# ]] && continue
+  if [[ ! "$line" =~ ^[[:space:]]*APPROVED[[:space:]]+([^[:space:]]+)[[:space:]]*$ ]]; then
+    echo "Invalid line in approved list: '$line'" >&2
+    echo "Expected format: APPROVED <thread_id>" >&2
+    exit 2
+  fi
+  tid="${BASH_REMATCH[1]}"
+  run_resolve "$tid"
+done < "$approved_file"
