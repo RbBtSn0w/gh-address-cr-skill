@@ -146,7 +146,7 @@ scripts/final_gate.sh --auto-clean --audit-id run-YYYYMMDD owner/repo 123
 If `scripts/final_gate.sh` fails:
 
 1. Read the pending table in terminal output and the printed audit summary path.
-2. For each pending thread, verify both operations were completed: `post_reply` and `resolve_thread`.
+2. For each pending thread, verify both operations were completed: `scripts/post_reply.sh` and `scripts/resolve_thread.sh`.
 3. Re-run `scripts/run_once.sh --show-all ...` to compare unresolved vs handled state.
 4. Resolve remaining threads, then re-run `scripts/final_gate.sh`.
 

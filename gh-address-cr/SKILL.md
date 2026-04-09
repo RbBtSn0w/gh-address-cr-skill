@@ -22,7 +22,7 @@ Use this skill in strict incremental mode to minimize token usage while keeping 
    - `scripts/run_once.sh [--audit-id <id>] <owner/repo> <pr_number>`
 2. Process only unresolved + unhandled threads.
 3. For each thread: `understand -> analyze/decide (Accept/Defer/Clarify) -> act (fix code OR write rationale) -> evidence reply -> resolve`. (Note: You MUST resolve the thread on GitHub after replying to pass the final gate).
-   - `post_reply` and `resolve_thread` are separate atomic operations. Both MUST be executed for handled threads.
+   - `scripts/post_reply.sh` and `scripts/resolve_thread.sh` are separate atomic operations. Both MUST be executed for handled threads.
 4. Use minimal fixes and targeted tests first.
 5. Before completion message, run hard gate (MANDATORY):
    - `scripts/final_gate.sh [--auto-clean|--no-auto-clean] [--audit-id <id>] <owner/repo> <pr_number>`

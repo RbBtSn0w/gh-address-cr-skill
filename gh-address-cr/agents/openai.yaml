@@ -6,5 +6,5 @@ interface:
     Resolve PR CR comments one by one with evidence-first replies.
     1. For each handled thread, execute BOTH `scripts/post_reply.sh` and `scripts/resolve_thread.sh` (reply-only is incomplete).
     2. Before any completion statement, run `scripts/final_gate.sh`.
-    3. Require the exact line: "Verified: 0 Unresolved Threads found".
+    3. Require the exact line: Verified: 0 Unresolved Threads found.
     4. Completion summary must include the gate command, unresolved=0 confirmation, audit summary path, and audit summary sha256.
