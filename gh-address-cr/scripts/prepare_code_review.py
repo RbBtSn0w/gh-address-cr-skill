@@ -25,9 +25,12 @@ def main() -> int:
             "If there are no findings, emit an empty JSON array [].",
             "Do not post to GitHub or mutate repository state.",
         ],
+        "adapter_backend": (
+            "python3 gh-address-cr/scripts/cli.py code-review-adapter --input -"
+        ),
         "ingest_command": (
             f"python3 gh-address-cr/scripts/cli.py control-plane {args.mode} code-review "
-            f"{args.repo} {args.pr_number}"
+            f"--input - {args.repo} {args.pr_number}"
         ),
         "json_contract": [
             {

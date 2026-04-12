@@ -8,6 +8,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 COMMAND_TO_SCRIPT = {
     "control-plane": "control_plane.py",
+    "code-review-adapter": "code_review_adapter.py",
     "prepare-code-review": "prepare_code_review.py",
     "run-once": "run_once.py",
     "final-gate": "final_gate.py",

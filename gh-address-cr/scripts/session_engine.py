@@ -189,6 +189,12 @@ def history_event(event: str, note: str = "", actor: str = "system") -> dict:
     return {"ts": utc_now(), "event": event, "note": note, "actor": actor}
 
 
+def clear_claim(item: dict):
+    item["claimed_by"] = None
+    item["claimed_at"] = None
+    item["lease_expires_at"] = None
+
+
 def read_records_from_stdin() -> list[dict]:
     raw = sys.stdin.read().strip()
     if not raw:
@@ -441,6 +447,9 @@ def cmd_update_item(args):
     item["updated_at"] = utc_now()
     if args.status == "OPEN" and previous_status in {"DEFERRED", "CLARIFIED", "CLOSED", "STALE", "DROPPED"}:
         item["reopen_count"] = item.get("reopen_count", 0) + 1
+    if item["item_kind"] == "local_finding" and args.status in {"CLARIFIED", "DEFERRED", "VERIFIED", "CLOSED"}:
+        item["handled"] = True
+        item["handled_at"] = utc_now()
     if args.handled:
         item["handled"] = True
         item["handled_at"] = utc_now()
@@ -450,7 +459,7 @@ def cmd_update_item(args):
         item["resolution_note"] = args.note
         item["history"].append(history_event("status-updated", args.note, actor=args.actor))
     if args.status in NON_BLOCKING_STATUSES:
-        item["lease_expires_at"] = None
+        clear_claim(item)
     save_session(session)
     append_audit_event(
         args.repo,
@@ -504,7 +513,7 @@ def cmd_close_item(args):
     item["blocking"] = False
     item["handled"] = True
     item["handled_at"] = utc_now()
-    item["lease_expires_at"] = None
+    clear_claim(item)
     item["updated_at"] = utc_now()
     item["resolution_note"] = args.note
     item["history"].append(history_event("closed", args.note or "Closed item", actor=args.actor))
@@ -518,6 +527,51 @@ def cmd_close_item(args):
         {"item_id": args.item_id, "actor": args.actor},
     )
     print(f"Closed item: {args.item_id}")
+    return 0
+
+
+def cmd_resolve_local_item(args):
+    session = load_session(args.repo, args.pr_number)
+    item = ensure_item(session, args.item_id)
+    if item["item_kind"] != "local_finding":
+        raise SystemExit("resolve-local-item only supports local_finding items.")
+    require_note("CLOSED" if args.resolution == "fix" else "CLARIFIED", args.note)
+
+    if args.resolution == "fix":
+        validate_transition(item["status"], "CLOSED")
+        item["status"] = "CLOSED"
+        item["decision"] = "accept"
+        item["history"].append(history_event("accepted", args.note, actor=args.actor))
+        item["history"].append(history_event("fixed", args.note, actor=args.actor))
+        item["history"].append(history_event("verified", args.note, actor=args.actor))
+        item["history"].append(history_event("closed", args.note, actor=args.actor))
+    elif args.resolution == "clarify":
+        validate_transition(item["status"], "CLARIFIED")
+        item["status"] = "CLARIFIED"
+        item["decision"] = "clarify"
+        item["history"].append(history_event("clarified", args.note, actor=args.actor))
+    else:
+        validate_transition(item["status"], "DEFERRED")
+        item["status"] = "DEFERRED"
+        item["decision"] = "defer"
+        item["history"].append(history_event("deferred", args.note, actor=args.actor))
+
+    item["blocking"] = blocking_for_status(item["status"])
+    item["handled"] = not item["blocking"]
+    item["handled_at"] = utc_now() if item["handled"] else None
+    clear_claim(item)
+    item["updated_at"] = utc_now()
+    item["resolution_note"] = args.note
+    save_session(session)
+    append_audit_event(
+        args.repo,
+        args.pr_number,
+        "resolve-local-item",
+        "ok",
+        "Applied terminal resolution to local finding",
+        {"item_id": args.item_id, "resolution": args.resolution, "actor": args.actor},
+    )
+    print(f"Resolved local item: {args.item_id} -> {item['status']}")
     return 0
 
 
@@ -735,6 +789,15 @@ def build_parser():
     close_item.add_argument("--note", default="")
     close_item.add_argument("--actor", default="system")
     close_item.set_defaults(func=cmd_close_item)
+
+    resolve_local_item = sub.add_parser("resolve-local-item")
+    resolve_local_item.add_argument("repo")
+    resolve_local_item.add_argument("pr_number")
+    resolve_local_item.add_argument("item_id")
+    resolve_local_item.add_argument("resolution", choices=["fix", "clarify", "defer"])
+    resolve_local_item.add_argument("--note", required=True)
+    resolve_local_item.add_argument("--actor", default="system")
+    resolve_local_item.set_defaults(func=cmd_resolve_local_item)
 
     mark_published = sub.add_parser("mark-published")
     mark_published.add_argument("repo")

@@ -22,7 +22,7 @@
   1. generate the standard producer prompt with `prepare-code-review`
   2. run a local code-review workflow
   3. require structured findings JSON, not only Markdown
-  4. `ingest_findings.sh`
+  4. `run_local_review.sh` with the built-in `code-review-adapter`
   5. process local findings through session status transitions
   6. `final_gate.sh`
 
@@ -54,7 +54,7 @@
   2. generate the standard producer prompt with `prepare-code-review`
   3. run a local code-review workflow
   4. require structured findings JSON
-  5. `ingest_findings.sh`
+  5. `run_local_review.sh` with the built-in `code-review-adapter`
   6. process GitHub threads and local findings as one session queue
   7. `final_gate.sh`
 
@@ -95,6 +95,7 @@
   - must produce findings JSON before session handling starts
   - do not stop at a Markdown summary
   - use `prepare-code-review` to generate the bridge prompt shape
+  - intake is normalized by the built-in `code-review-adapter`
 - `json`
   - assumes findings already exist in machine-readable form
 - `adapter`

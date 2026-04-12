@@ -63,6 +63,8 @@ python3 gh-address-cr/scripts/cli.py prepare-code-review <local|mixed> <owner/re
 
 This does not run another skill by itself. It emits the exact findings contract and ingest target so a local review producer can feed `gh-address-cr` without prompt drift.
 
+`code-review` intake is now adapter-backed. Once you have structured findings JSON, `control-plane` routes it through the built-in adapter instead of maintaining a separate special-case ingest path.
+
 By default, the skill stores its PR progress + audit artifacts in a user cache directory
 (override with `GH_ADDRESS_CR_STATE_DIR`). If the cache is purged, the workflow can be rebuilt
 from GitHub thread state; the main downside is potential repeated work.
@@ -173,6 +175,13 @@ Adapter contract:
 
 This path does not auto-post to GitHub. It creates local session items that can be fixed and verified in the same workflow as remote review threads.
 
+If the producer is a local `code-review` run, use the built-in adapter backend:
+
+```bash
+python3 gh-address-cr/scripts/cli.py prepare-code-review mixed owner/repo 123
+cat findings.json | python3 gh-address-cr/scripts/cli.py control-plane mixed code-review --input - owner/repo 123
+```
+
 If your review tool already produces findings JSON, you do not need a custom adapter command. Use `scripts/ingest_findings.sh` instead:
 
 ```bash
@@ -206,11 +215,20 @@ To reclaim expired item claims inside a PR session:
 python3 gh-address-cr/scripts/session_engine.py reclaim-stale-claims owner/repo 123
 ```
 
+To apply a terminal local finding resolution atomically, use:
+
+```bash
+python3 gh-address-cr/scripts/session_engine.py resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally and verified."
+python3 gh-address-cr/scripts/session_engine.py resolve-local-item owner/repo 123 local-finding:<fingerprint> clarify --note "Expected behavior."
+python3 gh-address-cr/scripts/session_engine.py resolve-local-item owner/repo 123 local-finding:<fingerprint> defer --note "Deferred to a follow-up PR."
+```
+
 ## Python-First Script Layout
 
 The main logic now lives in Python under `gh-address-cr/scripts/`:
 
 - `cli.py`
+- `code_review_adapter.py`
 - `session_engine.py`
 - `python_common.py`
 - `run_once.py`
@@ -235,6 +253,8 @@ python3 gh-address-cr/scripts/cli.py run-once owner/repo 123
 python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean owner/repo 123
 python3 gh-address-cr/scripts/cli.py session-engine gate owner/repo 123
 python3 gh-address-cr/scripts/cli.py ingest-findings --source local-agent:code-review owner/repo 123 --input findings.json
+python3 gh-address-cr/scripts/cli.py control-plane mixed code-review --input findings.json owner/repo 123
+python3 gh-address-cr/scripts/cli.py session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally."
 ```
 
 ## Testing

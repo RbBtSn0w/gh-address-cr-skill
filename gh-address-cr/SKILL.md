@@ -42,24 +42,21 @@ Treat `SKILL.md` as the source of truth for using this skill.
 These paths are fully operational now:
 
 - `remote`
+- `local code-review`
 - `local json`
 - `local adapter`
+- `mixed code-review`
 - `mixed json`
 - `mixed adapter`
 - `ingest json`
 
-These paths are contract-supported but not yet auto-bridged:
-
-- `local code-review`
-- `mixed code-review`
-
-For `producer=code-review`, the current requirement is:
+For `producer=code-review`, the execution model is:
 
 - generate the bridge prompt with `prepare-code-review`
-- produce findings JSON first
-- then feed it through `control-plane` or `ingest-findings`
+- run the external review step and produce findings JSON first
+- let `control-plane` pass that JSON through the built-in `code-review-adapter`
 
-Do not assume `gh-address-cr` directly runs another review skill by itself yet.
+Do not assume `gh-address-cr` directly runs another review skill by itself. The review step is still external; the intake path is now adapter-backed and stable.
 
 ## Non-Negotiable Rule
 
@@ -87,6 +84,7 @@ Do not assume `gh-address-cr` directly runs another review skill by itself yet.
 `gh-address-cr` is the control plane. Producers are replaceable.
 
 - `code-review` is a producer, not the session owner.
+- `code-review` now uses the built-in `code-review-adapter` backend for structured intake.
 - `gh-address-cr` only assumes the normalized finding contract:
   - `title`
   - `body`
@@ -154,3 +152,4 @@ Final output must include:
 - stable operator surface: `scripts/*.sh`
 - preferred automation surface: `python3 scripts/cli.py ...`
 - code-review bridge prompt: `python3 scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>`
+- code-review adapter backend: `python3 scripts/cli.py code-review-adapter --input -`

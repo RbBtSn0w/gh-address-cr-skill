@@ -2,6 +2,7 @@
 import argparse
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -10,6 +11,7 @@ RUN_ONCE = SCRIPT_DIR / "run_once.py"
 RUN_LOCAL_REVIEW = SCRIPT_DIR / "run_local_review.py"
 INGEST_FINDINGS = SCRIPT_DIR / "ingest_findings.py"
 FINAL_GATE = SCRIPT_DIR / "final_gate.py"
+CODE_REVIEW_ADAPTER = SCRIPT_DIR / "code_review_adapter.py"
 
 VALID_MODES = {"remote", "local", "mixed", "ingest"}
 VALID_PRODUCERS = {"code-review", "json", "adapter"}
@@ -82,11 +84,12 @@ def main(argv: list[str] | None = None) -> int:
         return die(f"Unsupported producer: {producer}")
     if args.mode == "remote" and producer is not None:
         return die("remote mode does not accept a producer.")
-    if args.mode == "ingest" and producer == "adapter":
-        return die("ingest mode does not support producer=adapter.")
+    if args.mode == "ingest" and producer != "json":
+        return die("ingest mode only supports producer=json.")
 
     source = args.source or (f"local-agent:{producer}" if producer else "")
     stdin_payload = None
+    temp_input_path: Path | None = None
 
     if args.mode in {"local", "mixed", "ingest"}:
         if producer == "adapter":
@@ -95,53 +98,84 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if extra:
                 return die(f"producer={producer} does not accept an adapter command.")
-            if args.input is None:
+            if args.input == "-":
+                stdin_payload = sys.stdin.read()
+                if not stdin_payload.strip():
+                    return die(f"producer={producer} requires findings JSON via --input or stdin.")
+            elif args.input is None:
                 stdin_payload = sys.stdin.read()
                 if not stdin_payload.strip():
                     return die(f"producer={producer} requires findings JSON via --input or stdin.")
 
-    results: list[subprocess.CompletedProcess[str]] = []
+    try:
+        results: list[subprocess.CompletedProcess[str]] = []
 
-    if args.mode in {"remote", "mixed"}:
-        cmd = [sys.executable, str(RUN_ONCE)]
-        if args.audit_id:
-            cmd.extend(["--audit-id", args.audit_id])
-        cmd.extend([repo, pr_number])
-        results.append(run_command(cmd))
-
-    if args.mode in {"local", "mixed", "ingest"}:
-        if producer == "adapter":
-            cmd = [sys.executable, str(RUN_LOCAL_REVIEW)]
-            if args.scan_id:
-                cmd.extend(["--scan-id", args.scan_id])
-            if source:
-                cmd.extend(["--source", source])
-            cmd.extend([repo, pr_number, *extra])
-            results.append(run_command(cmd))
-        else:
-            cmd = [sys.executable, str(INGEST_FINDINGS)]
-            if args.scan_id:
-                cmd.extend(["--scan-id", args.scan_id])
-            if source:
-                cmd.extend(["--source", source])
-            if args.input is not None:
-                cmd.extend(["--input", args.input])
+        if args.mode in {"remote", "mixed"}:
+            cmd = [sys.executable, str(RUN_ONCE)]
+            if args.audit_id:
+                cmd.extend(["--audit-id", args.audit_id])
             cmd.extend([repo, pr_number])
-            results.append(run_command(cmd, stdin=stdin_payload))
+            results.append(run_command(cmd))
 
-    if args.gate:
-        cmd = [sys.executable, str(FINAL_GATE), "--no-auto-clean"]
-        if args.audit_id:
-            cmd.extend(["--audit-id", args.audit_id])
-        cmd.extend([repo, pr_number])
-        results.append(run_command(cmd))
+        if args.mode in {"local", "mixed", "ingest"}:
+            if producer == "adapter":
+                cmd = [sys.executable, str(RUN_LOCAL_REVIEW)]
+                if args.scan_id:
+                    cmd.extend(["--scan-id", args.scan_id])
+                if source:
+                    cmd.extend(["--source", source])
+                cmd.extend([repo, pr_number, *extra])
+                results.append(run_command(cmd))
+            elif producer == "code-review":
+                input_arg = args.input
+                if stdin_payload is not None:
+                    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
+                        handle.write(stdin_payload)
+                        temp_input_path = Path(handle.name)
+                    input_arg = str(temp_input_path)
+                cmd = [sys.executable, str(RUN_LOCAL_REVIEW)]
+                if args.scan_id:
+                    cmd.extend(["--scan-id", args.scan_id])
+                if source:
+                    cmd.extend(["--source", source])
+                cmd.extend(
+                    [
+                        repo,
+                        pr_number,
+                        sys.executable,
+                        str(CODE_REVIEW_ADAPTER),
+                        "--input",
+                        input_arg or "-",
+                    ]
+                )
+                results.append(run_command(cmd))
+            else:
+                cmd = [sys.executable, str(INGEST_FINDINGS)]
+                if args.scan_id:
+                    cmd.extend(["--scan-id", args.scan_id])
+                if source:
+                    cmd.extend(["--source", source])
+                if args.input is not None:
+                    cmd.extend(["--input", args.input])
+                cmd.extend([repo, pr_number])
+                results.append(run_command(cmd, stdin=stdin_payload))
 
-    exit_code = 0
-    for result in results:
-        emit(result)
-        if result.returncode != 0 and exit_code == 0:
-            exit_code = result.returncode
-    return exit_code
+        if args.gate:
+            cmd = [sys.executable, str(FINAL_GATE), "--no-auto-clean"]
+            if args.audit_id:
+                cmd.extend(["--audit-id", args.audit_id])
+            cmd.extend([repo, pr_number])
+            results.append(run_command(cmd))
+
+        exit_code = 0
+        for result in results:
+            emit(result)
+            if result.returncode != 0 and exit_code == 0:
+                exit_code = result.returncode
+        return exit_code
+    finally:
+        if temp_input_path and temp_input_path.exists():
+            temp_input_path.unlink()
 
 
 if __name__ == "__main__":

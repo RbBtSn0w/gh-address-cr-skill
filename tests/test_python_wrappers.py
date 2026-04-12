@@ -5,6 +5,7 @@ from pathlib import Path
 from tests.helpers import (
     CLI_PY,
     CONTROL_PLANE_PY,
+    CODE_REVIEW_ADAPTER_PY,
     FINAL_GATE_PY,
     INGEST_FINDINGS_PY,
     LIST_THREADS_PY,
@@ -318,6 +319,77 @@ else:
         self.assertIn("github-thread:THREAD_MIXED", result.stdout)
         self.assertIn("Created 1 local item", result.stdout)
 
+    def test_control_plane_mixed_code_review_accepts_dash_input_from_stdin(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        payload = json.dumps(
+            [
+                {
+                    "title": "stdin bridge finding",
+                    "body": "Imported through --input -.",
+                    "path": "src/stdin_bridge.py",
+                    "line": 14,
+                    "severity": "P2",
+                }
+            ]
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CONTROL_PLANE_PY),
+                "mixed",
+                "code-review",
+                "--input",
+                "-",
+                self.repo,
+                self.pr,
+            ],
+            stdin=payload,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Created 1 local item", result.stdout)
+
+        list_result = self.run_cmd(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "list-items",
+                self.repo,
+                self.pr,
+                "--item-kind",
+                "local_finding",
+            ],
+            check=True,
+        )
+        item = json.loads(list_result.stdout.strip())
+        self.assertEqual(item["title"], "stdin bridge finding")
+        self.assertEqual(item["line"], 14)
+
     def test_control_plane_local_adapter_runs_adapter(self):
         adapter = Path(self.temp_dir.name) / "adapter.py"
         adapter.write_text(
@@ -354,6 +426,13 @@ else:
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires findings JSON", result.stderr)
 
+    def test_control_plane_rejects_ingest_code_review(self):
+        result = self.run_cmd(
+            [sys.executable, str(CONTROL_PLANE_PY), "ingest", "code-review", self.repo, self.pr]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ingest mode only supports producer=json", result.stderr)
+
     def test_prepare_code_review_emits_bridge_prompt(self):
         result = self.run_cmd(
             [sys.executable, str(PREPARE_CODE_REVIEW_PY), "mixed", self.repo, self.pr]
@@ -363,7 +442,32 @@ else:
         self.assertEqual(payload["producer"], "code-review")
         self.assertEqual(payload["mode"], "mixed")
         self.assertIn("emit findings json", " ".join(payload["instructions"]).lower())
+        self.assertIn("code-review-adapter", payload["adapter_backend"])
         self.assertIn("control-plane mixed code-review", payload["ingest_command"])
+
+    def test_code_review_adapter_normalizes_findings(self):
+        payload = json.dumps(
+            {
+                "findings": [
+                    {
+                        "check": "null-guard",
+                        "description": "Potential null dereference.",
+                        "filename": "src/code_review.py",
+                        "position": 9,
+                        "severity": "P1",
+                    }
+                ]
+            }
+        )
+        result = self.run_cmd(
+            [sys.executable, str(CODE_REVIEW_ADAPTER_PY)],
+            stdin=payload,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        findings = json.loads(result.stdout)
+        self.assertEqual(findings[0]["title"], "null-guard")
+        self.assertEqual(findings[0]["path"], "src/code_review.py")
+        self.assertEqual(findings[0]["line"], 9)
 
     def test_cli_dispatches_prepare_code_review(self):
         result = self.run_cmd(

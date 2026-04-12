@@ -245,6 +245,81 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertFalse(item["blocking"])
         self.assertTrue(item["handled"])
 
+    def test_resolve_local_item_fix_closes_atomically_and_clears_claim(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        local_payload = json.dumps(
+            [
+                {
+                    "title": "Unsafe cast",
+                    "body": "The cast can fail at runtime.",
+                    "path": "src/b.py",
+                    "line": 7,
+                    "severity": "P2",
+                    "category": "runtime",
+                }
+            ]
+        )
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        session = self.load_session()
+        local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+        self.run_engine("claim", self.repo, self.pr, local_id, "--agent", "fixer-1", check=True)
+
+        resolved = self.run_engine(
+            "resolve-local-item",
+            self.repo,
+            self.pr,
+            local_id,
+            "fix",
+            "--note",
+            "Fixed locally and verified.",
+        )
+        self.assertEqual(resolved.returncode, 0, resolved.stderr)
+        self.assertIn("Resolved local item", resolved.stdout)
+
+        session = self.load_session()
+        item = session["items"][local_id]
+        self.assertEqual(item["status"], "CLOSED")
+        self.assertEqual(item["decision"], "accept")
+        self.assertTrue(item["handled"])
+        self.assertIsNone(item["claimed_by"])
+        self.assertIsNone(item["lease_expires_at"])
+
+    def test_update_item_terminal_local_status_clears_claim_and_marks_handled(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        local_payload = json.dumps(
+            [
+                {
+                    "title": "Clarify behavior",
+                    "body": "This is expected behavior.",
+                    "path": "src/c.py",
+                    "line": 9,
+                    "severity": "P3",
+                    "category": "docs",
+                }
+            ]
+        )
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        session = self.load_session()
+        local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+        self.run_engine("claim", self.repo, self.pr, local_id, "--agent", "fixer-1", check=True)
+        self.run_engine(
+            "update-item",
+            self.repo,
+            self.pr,
+            local_id,
+            "CLARIFIED",
+            "--note",
+            "Expected behavior; no code change needed.",
+            check=True,
+        )
+
+        session = self.load_session()
+        item = session["items"][local_id]
+        self.assertEqual(item["status"], "CLARIFIED")
+        self.assertTrue(item["handled"])
+        self.assertIsNone(item["claimed_by"])
+        self.assertIsNone(item["lease_expires_at"])
+
     def test_update_item_rejects_illegal_transition(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         payload = json.dumps(
