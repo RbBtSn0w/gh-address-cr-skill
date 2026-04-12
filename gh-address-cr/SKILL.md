@@ -1,11 +1,45 @@
 ---
 name: gh-address-cr
 description: Use when operating on an existing GitHub Pull Request that has remote review threads, local AI review findings, or repeated CR loops that must be tracked in one auditable PR session.
+argument-hint: "<mode> [producer] <owner/repo> <pr_number>"
 ---
 
 # gh-address-cr
 
 Use this skill in strict incremental mode to run a PR-scoped CR session with one source of truth.
+
+## Usage
+
+```text
+/gh-address-cr remote <owner/repo> <pr_number>
+/gh-address-cr local <producer> <owner/repo> <pr_number>
+/gh-address-cr mixed <producer> <owner/repo> <pr_number>
+/gh-address-cr ingest <producer> <owner/repo> <pr_number>
+```
+
+Interpret the arguments as:
+
+- `mode`
+  - `remote`: only GitHub review threads
+  - `local`: only local review findings
+  - `mixed`: GitHub review threads plus local review findings
+  - `ingest`: import external findings JSON without running a local adapter command
+- `producer`
+  - `code-review`: a local code-review producer that must emit findings JSON
+  - `json`: findings already exist as JSON and should be imported directly
+  - `adapter`: a custom adapter command will be used
+
+If `mode` is omitted, infer it from the task:
+
+- existing PR review threads only -> `remote`
+- local CR requested with a producer -> `local`
+- both remote review and local CR requested -> `mixed`
+
+If `producer` is omitted in a local or mixed request, default to:
+
+- `json` when the user already provided findings JSON
+- `adapter` when the user provided a concrete command
+- `code-review` when the user explicitly asked for local AI review but did not specify a producer
 
 ## Non-Negotiable Rule
 
@@ -21,37 +55,81 @@ Use this skill in strict incremental mode to run a PR-scoped CR session with one
 
 1. Run incremental triage first:
    - `scripts/run_once.sh [--audit-id <id>] <owner/repo> <pr_number>`
-2. Optionally ingest local AI review findings:
+2. If local review is part of the selected mode, choose exactly one producer path:
+   - `producer=code-review`
+     - generate findings JSON using a local code-review workflow
+     - then ingest with `scripts/ingest_findings.sh`
+   - `producer=json`
+     - ingest provided findings JSON directly with `scripts/ingest_findings.sh`
+   - `producer=adapter`
+     - execute `scripts/run_local_review.sh`
+3. Optionally ingest local AI review findings:
    - `scripts/run_local_review.sh [--scan-id <id>] [--source <name>] <owner/repo> <pr_number> <adapter_cmd> [args...]`
    - or `scripts/ingest_findings.sh [--scan-id <id>] [--source <name>] [--input <file>|-] <owner/repo> <pr_number>`
-3. Process only unresolved + unhandled GitHub threads and open local findings.
-4. For each item: `understand -> analyze/decide (Accept/Defer/Clarify) -> act (fix code OR write rationale) -> evidence -> close`. For GitHub threads, you MUST still reply and resolve on GitHub.
+4. Process only unresolved + unhandled GitHub threads and open local findings.
+5. For each item: `understand -> analyze/decide (Accept/Defer/Clarify) -> act (fix code OR write rationale) -> evidence -> close`. For GitHub threads, you MUST still reply and resolve on GitHub.
    - `scripts/post_reply.sh` and `scripts/resolve_thread.sh` are separate atomic operations. Both MUST be executed for handled threads.
-5. Use minimal fixes and targeted tests first.
-6. Before completion message, run hard gate (MANDATORY):
+6. Use minimal fixes and targeted tests first.
+7. Before completion message, run hard gate (MANDATORY):
    - `scripts/final_gate.sh [--auto-clean|--no-auto-clean] [--audit-id <id>] <owner/repo> <pr_number>`
-7. Only if gate passes, send merge-readiness summary.
+8. Only if gate passes, send merge-readiness summary.
 
 ## Mode Selection
 
-Choose the workflow based on the item source, not by habit.
+Choose the workflow based on `mode` and `producer`, not by habit.
 
-- `github_thread` only:
+- `remote`:
   - use `run_once.sh`
   - handle each thread with reply plus resolve
   - finish with `final_gate.sh`
-- `local_finding` only:
-  - use `run_local_review.sh` if you have an adapter command
-  - use `ingest_findings.sh` if your review tool already emits findings JSON
+- `local code-review`:
+  - generate local findings JSON with a code-review workflow
+  - ingest with `ingest_findings.sh`
   - move items through session status updates with notes
   - do not reply/resolve on GitHub unless you explicitly publish the finding
-- mixed PR session:
-  - run both `run_once.sh` and `run_local_review.sh`
+- `local json`:
+  - use `ingest_findings.sh`
+  - move items through session status updates with notes
+  - do not reply/resolve on GitHub unless you explicitly publish the finding
+- `local adapter`:
+  - use `run_local_review.sh`
+  - move items through session status updates with notes
+  - do not reply/resolve on GitHub unless you explicitly publish the finding
+- `mixed code-review`:
+  - run `run_once.sh`
+  - generate findings JSON with a code-review workflow
+  - ingest with `ingest_findings.sh`
+- `mixed json`:
+  - run `run_once.sh`
+  - ingest provided findings JSON with `ingest_findings.sh`
+- `mixed adapter`:
+  - run `run_once.sh` and `run_local_review.sh`
   - process GitHub items and local items in the same session queue
   - gate must clear both unresolved GitHub threads and session blocking items
+- `ingest`:
+  - import findings JSON without making assumptions about how they were produced
+  - use when the user already has machine-readable findings and only wants session handling
 - publish local finding:
   - use `scripts/publish_finding.sh --repo <owner/repo> --pr <number> <local_item_id>`
   - after publication, resync and continue from the session state
+
+## Producer Contract
+
+`gh-address-cr` is the control plane. Producers are replaceable.
+
+- `code-review` is a producer, not the session owner.
+- `gh-address-cr` must not depend on one producer-specific finding schema beyond the normalized contract.
+- Any producer is acceptable if it can supply findings that normalize into:
+  - `title`
+  - `body`
+  - `path`
+  - `line`
+
+For `producer=code-review`, require structured findings output first. Do not stop at a Markdown review summary.
+
+The full dispatch table for supported `mode + producer` combinations lives in:
+
+- `references/mode-producer-matrix.md`
 
 ## Decision Matrix (Analysis Phase)
 

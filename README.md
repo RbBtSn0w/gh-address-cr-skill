@@ -10,6 +10,45 @@ It now treats a Pull Request as the session root and can ingest both:
 Both become session items that move through one evidence-first workflow with a final gate.
 For handled GitHub threads, replying and resolving are still two separate required operations.
 
+## Control Plane Interface
+
+`gh-address-cr` should now be understood as a PR-scoped control plane with:
+
+- a `mode`
+- an optional local-review `producer`
+
+Recommended invocation model:
+
+```text
+/gh-address-cr remote <owner/repo> <pr_number>
+/gh-address-cr local <producer> <owner/repo> <pr_number>
+/gh-address-cr mixed <producer> <owner/repo> <pr_number>
+/gh-address-cr ingest <producer> <owner/repo> <pr_number>
+```
+
+Supported producers:
+
+- `code-review`
+- `json`
+- `adapter`
+
+Meaning:
+
+- `remote`
+  - only GitHub review threads are part of the session
+- `local`
+  - only locally produced findings are part of the session
+- `mixed`
+  - GitHub review threads and local findings are both part of the session
+- `ingest`
+  - import existing findings JSON into the session without running a local adapter
+
+This keeps `gh-address-cr` as the session/gate/orchestration layer while letting different review producers feed findings into the same PR workflow.
+
+The exact dispatch behavior for each supported `mode + producer` combination is documented in:
+
+- `gh-address-cr/references/mode-producer-matrix.md`
+
 By default, the skill stores its PR progress + audit artifacts in a user cache directory
 (override with `GH_ADDRESS_CR_STATE_DIR`). If the cache is purged, the workflow can be rebuilt
 from GitHub thread state; the main downside is potential repeated work.
