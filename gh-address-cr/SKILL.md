@@ -23,6 +23,7 @@ Use this skill in strict incremental mode to run a PR-scoped CR session with one
    - `scripts/run_once.sh [--audit-id <id>] <owner/repo> <pr_number>`
 2. Optionally ingest local AI review findings:
    - `scripts/run_local_review.sh [--scan-id <id>] [--source <name>] <owner/repo> <pr_number> <adapter_cmd> [args...]`
+   - or `scripts/ingest_findings.sh [--scan-id <id>] [--source <name>] [--input <file>|-] <owner/repo> <pr_number>`
 3. Process only unresolved + unhandled GitHub threads and open local findings.
 4. For each item: `understand -> analyze/decide (Accept/Defer/Clarify) -> act (fix code OR write rationale) -> evidence -> close`. For GitHub threads, you MUST still reply and resolve on GitHub.
    - `scripts/post_reply.sh` and `scripts/resolve_thread.sh` are separate atomic operations. Both MUST be executed for handled threads.
@@ -40,7 +41,8 @@ Choose the workflow based on the item source, not by habit.
   - handle each thread with reply plus resolve
   - finish with `final_gate.sh`
 - `local_finding` only:
-  - use `run_local_review.sh`
+  - use `run_local_review.sh` if you have an adapter command
+  - use `ingest_findings.sh` if your review tool already emits findings JSON
   - move items through session status updates with notes
   - do not reply/resolve on GitHub unless you explicitly publish the finding
 - mixed PR session:
@@ -97,6 +99,7 @@ Any final completion message must include:
 - Unified Python automation entrypoint: `python3 scripts/cli.py <command> ...`
 - One-shot triage + state snapshot: `scripts/run_once.sh [--show-all] [--audit-id <id>] <owner/repo> <pr_number>`
 - Local review ingestion: `scripts/run_local_review.sh [--scan-id <id>] [--source <name>] <owner/repo> <pr_number> <adapter_cmd> [args...]`
+- Direct findings JSON ingestion: `scripts/ingest_findings.sh [--scan-id <id>] [--source <name>] [--input <file>|-] <owner/repo> <pr_number>`
 - Publish a local finding to GitHub review comments: `scripts/publish_finding.sh --repo <owner/repo> --pr <number> <local_item_id>`
 - Close a local or session item after evidence: `python3 scripts/session_engine.py close-item <owner/repo> <pr_number> <item_id> --note <text>`
 - Reclaim expired item claims during loops: `python3 scripts/session_engine.py reclaim-stale-claims <owner/repo> <pr_number>`

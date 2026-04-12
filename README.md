@@ -120,6 +120,27 @@ Adapter contract:
 
 This path does not auto-post to GitHub. It creates local session items that can be fixed and verified in the same workflow as remote review threads.
 
+If your review tool already produces findings JSON, you do not need a custom adapter command. Use `scripts/ingest_findings.sh` instead:
+
+```bash
+cat findings.json | scripts/ingest_findings.sh --source local-agent:code-review owner/repo 123
+```
+
+Accepted input shapes:
+
+- JSON array of finding objects
+- JSON object with `findings`, `issues`, or `results`
+- NDJSON, one finding object per line
+
+Field normalization is intentionally broad so external tools can map in without a custom schema bridge:
+
+- `path` or `file` or `filename`
+- `line` or `start_line` or `position`
+- `title` or `rule` or `check`
+- `body` or `message` or `description`
+
+This is the long-term integration path for any local code-review tool. If it can emit structured findings JSON, `gh-address-cr` can ingest it into the PR session.
+
 To publish a local finding back to GitHub as a review comment:
 
 ```bash
@@ -160,6 +181,7 @@ Unified CLI examples:
 python3 gh-address-cr/scripts/cli.py run-once owner/repo 123
 python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean owner/repo 123
 python3 gh-address-cr/scripts/cli.py session-engine gate owner/repo 123
+python3 gh-address-cr/scripts/cli.py ingest-findings --source local-agent:code-review owner/repo 123 --input findings.json
 ```
 
 ## Testing

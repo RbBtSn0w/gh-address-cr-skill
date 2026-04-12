@@ -5,6 +5,7 @@ from pathlib import Path
 from tests.helpers import (
     CLI_PY,
     FINAL_GATE_PY,
+    INGEST_FINDINGS_PY,
     LIST_THREADS_PY,
     POST_REPLY_PY,
     PUBLISH_FINDING_PY,
@@ -120,6 +121,139 @@ else:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Created 1 local item", result.stdout)
+
+    def test_ingest_findings_python_accepts_envelope_payload(self):
+        payload_file = Path(self.temp_dir.name) / "findings.json"
+        payload_file.write_text(
+            json.dumps(
+                {
+                    "findings": [
+                        {
+                            "title": "Envelope finding",
+                            "message": "Imported from another review tool.",
+                            "file": "src/envelope.py",
+                            "position": 9,
+                            "severity": "P2",
+                            "category": "correctness",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(INGEST_FINDINGS_PY),
+                "--source",
+                "local-agent:external-review",
+                "--input",
+                str(payload_file),
+                self.repo,
+                self.pr,
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Created 1 local item", result.stdout)
+
+        list_result = self.run_cmd(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "list-items",
+                self.repo,
+                self.pr,
+                "--item-kind",
+                "local_finding",
+            ],
+            check=True,
+        )
+        item = json.loads(list_result.stdout.strip())
+        self.assertEqual(item["path"], "src/envelope.py")
+        self.assertEqual(item["line"], 9)
+        self.assertEqual(item["body"], "Imported from another review tool.")
+
+    def test_cli_dispatches_ingest_findings(self):
+        payload_file = Path(self.temp_dir.name) / "findings-ndjson.jsonl"
+        payload_file.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "check": "null-guard",
+                            "description": "Potential null dereference.",
+                            "filename": "src/cli_ingest.py",
+                            "line": 5,
+                            "severity": "P1",
+                        }
+                    )
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "ingest-findings",
+                "--source",
+                "local-agent:cli-import",
+                "--input",
+                str(payload_file),
+                self.repo,
+                self.pr,
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Created 1 local item", result.stdout)
+
+    def test_ingest_findings_python_accepts_stdin_array(self):
+        payload = json.dumps(
+            [
+                {
+                    "title": "stdin finding",
+                    "body": "Imported through stdin.",
+                    "path": "src/stdin.py",
+                    "line": 3,
+                    "severity": "P3",
+                    "category": "docs",
+                }
+            ]
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(INGEST_FINDINGS_PY),
+                "--source",
+                "local-agent:stdin-review",
+                self.repo,
+                self.pr,
+            ],
+            stdin=payload,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Created 1 local item", result.stdout)
+
+        list_result = self.run_cmd(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "list-items",
+                self.repo,
+                self.pr,
+                "--item-kind",
+                "local_finding",
+            ],
+            check=True,
+        )
+        item = json.loads(list_result.stdout.strip())
+        self.assertEqual(item["path"], "src/stdin.py")
+        self.assertEqual(item["line"], 3)
+        self.assertEqual(item["source"], "local-agent:stdin-review")
 
     def test_publish_finding_python_dry_run_uses_diff_position(self):
         gh = self.bin_dir / "gh"

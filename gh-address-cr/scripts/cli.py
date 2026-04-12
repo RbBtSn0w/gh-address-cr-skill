@@ -13,6 +13,7 @@ COMMAND_TO_SCRIPT = {
     "post-reply": "post_reply.py",
     "resolve-thread": "resolve_thread.py",
     "run-local-review": "run_local_review.py",
+    "ingest-findings": "ingest_findings.py",
     "publish-finding": "publish_finding.py",
     "mark-handled": "mark_handled.py",
     "audit-report": "audit_report.py",
