@@ -24,7 +24,8 @@ def main() -> int:
                 "Marked handled without resolving.",
                 "--actor",
                 "mark_handled",
-            ]
+            ],
+            check=True,
         )
         handled_file = handled_threads_file(args.repo, args.pr_number)
         handled_file.parent.mkdir(parents=True, exist_ok=True)

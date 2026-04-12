@@ -62,6 +62,42 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("github-thread:THREAD_CLI", result.stdout)
 
+    def test_cli_dispatches_session_engine_list_items(self):
+        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
+        payload = json.dumps(
+            [
+                {
+                    "title": "CLI list-items",
+                    "body": "Ensure unified CLI dispatches to session engine correctly.",
+                    "path": "README.md",
+                    "line": 12,
+                    "severity": "P3",
+                    "category": "docs",
+                }
+            ]
+        )
+        self.run_cmd(
+            [sys.executable, str(SCRIPT), "ingest-local", self.repo, self.pr, "--source", "local-agent:test"],
+            stdin=payload,
+            check=True,
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "session-engine",
+                "list-items",
+                self.repo,
+                self.pr,
+                "--item-kind",
+                "local_finding",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("local-finding:", result.stdout)
+        self.assertIn("CLI list-items", result.stdout)
+
     def test_run_local_review_python_ingests_findings(self):
         adapter = Path(self.temp_dir.name) / "adapter.py"
         adapter.write_text(
@@ -96,7 +132,11 @@ args = sys.argv[1:]
 if args[:3] == ['pr', 'view', '77']:
     print('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
 elif args[:2] == ['api', 'repos/octo/example/pulls/77/files']:
-    print(json.dumps([{'filename':'src/a.py','patch':'@@ -1,1 +1,4 @@\\n line1\\n+line2\\n+line3\\n+line4'}]))
+    page = next((arg.split('=')[1] for arg in args if arg.startswith('page=')), '1')
+    if page == '1':
+        print(json.dumps([{'filename':'src/a.py','patch':'@@ -1,1 +1,4 @@\\n line1\\n+line2\\n+line3\\n+line4'}]))
+    else:
+        print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {args}')
 """,
@@ -126,6 +166,67 @@ else:
 
         list_result = self.run_cmd([sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True)
         item_id = json.loads(list_result.stdout.strip())["item_id"]
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(PUBLISH_FINDING_PY),
+                "--dry-run",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+                item_id,
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("position=4", result.stdout)
+
+    def test_publish_finding_python_dry_run_handles_multiple_pages(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+if args[:3] == ['pr', 'view', '77']:
+    print('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
+elif args[:2] == ['api', 'repos/octo/example/pulls/77/files']:
+    page = next((arg.split('=')[1] for arg in args if arg.startswith('page=')), '1')
+    if page == '1':
+        print(json.dumps([{'filename':'src/other.py','patch':'@@ -1,1 +1,1 @@\\n line1\\n+line2'}]))
+    elif page == '2':
+        print(json.dumps([{'filename':'src/a.py','patch':'@@ -1,1 +1,4 @@\\n line1\\n+line2\\n+line3\\n+line4'}]))
+    else:
+        print('[]')
+else:
+    raise SystemExit(f'unhandled gh args: {args}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
+        payload = json.dumps(
+            [
+                {
+                    "title": "Publish me",
+                    "body": "Dry-run publication.",
+                    "path": "src/a.py",
+                    "line": 4,
+                    "severity": "P3",
+                    "category": "docs",
+                }
+            ]
+        )
+        self.run_cmd(
+            [sys.executable, str(SCRIPT), "ingest-local", self.repo, self.pr, "--source", "local-agent:test"],
+            stdin=payload,
+            check=True,
+        )
+        list_result = self.run_cmd([sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True)
+        item_id = json.loads(list_result.stdout.strip())["item_id"]
+
         result = self.run_cmd(
             [
                 sys.executable,
@@ -344,3 +445,43 @@ else:
         item = session["items"]["github-thread:THREAD_RESOLVE"]
         self.assertEqual(item["status"], "CLOSED")
         self.assertTrue(item["handled"])
+
+    def test_resolve_thread_python_succeeds_when_item_not_yet_synced(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'resolveReviewThread': {
+                'thread': {
+                    'id': 'THREAD_ONLY_REMOTE',
+                    'isResolved': True,
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(RESOLVE_THREAD_PY),
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+                "THREAD_ONLY_REMOTE",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        handled_file = self.state_dir / "octo__example__pr77__handled_threads.txt"
+        self.assertIn("THREAD_ONLY_REMOTE", handled_file.read_text(encoding="utf-8"))

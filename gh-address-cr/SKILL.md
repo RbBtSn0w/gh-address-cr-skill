@@ -98,7 +98,7 @@ Any final completion message must include:
 - One-shot triage + state snapshot: `scripts/run_once.sh [--show-all] [--audit-id <id>] <owner/repo> <pr_number>`
 - Local review ingestion: `scripts/run_local_review.sh [--scan-id <id>] [--source <name>] <owner/repo> <pr_number> <adapter_cmd> [args...]`
 - Publish a local finding to GitHub review comments: `scripts/publish_finding.sh --repo <owner/repo> --pr <number> <local_item_id>`
-- Close a local or session item after evidence: `python3 scripts/session_engine.py close-item <owner/repo> <pr_number> <item_id> [--note <text>]`
+- Close a local or session item after evidence: `python3 scripts/session_engine.py close-item <owner/repo> <pr_number> <item_id> --note <text>`
 - Reclaim expired item claims during loops: `python3 scripts/session_engine.py reclaim-stale-claims <owner/repo> <pr_number>`
 - Final completion gate (mandatory): `scripts/final_gate.sh [--auto-clean|--no-auto-clean] [--audit-id <id>] <owner/repo> <pr_number>`
 - Post reply: `scripts/post_reply.sh [--dry-run] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_id> <reply_file>`

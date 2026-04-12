@@ -322,6 +322,7 @@ python3 gh-address-cr/scripts/session_engine.py list-items owner/repo 123 --item
 python3 gh-address-cr/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT ACCEPTED --note "Confirmed locally."
 python3 gh-address-cr/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT FIXED --note "Implemented fix."
 python3 gh-address-cr/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT VERIFIED --note "Validated with targeted tests."
+python3 gh-address-cr/scripts/session_engine.py close-item owner/repo 123 local-finding:FINGERPRINT --note "Closed after local validation."
 
 scripts/final_gate.sh --no-auto-clean --audit-id run-20260412 owner/repo 123
 ```
@@ -330,6 +331,7 @@ Rules:
 
 - local findings do not require GitHub reply/resolve unless you choose to publish them
 - they still participate in the same session gate
+- terminal local-item transitions require `--note`
 
 ### Mode 4: Mixed Session
 

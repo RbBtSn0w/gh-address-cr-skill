@@ -19,6 +19,10 @@ def append_handled(thread_id: str, repo: str | None = None, pr_number: str | Non
             handle.write(f"{thread_id}\n")
 
 
+def is_unknown_item_error(stderr: str) -> bool:
+    return "Unknown item:" in (stderr or "")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Resolve a GitHub PR review thread and sync session state.")
     parser.add_argument("--dry-run", action="store_true")
@@ -68,19 +72,9 @@ def main() -> int:
             ]
         )
         if update.returncode != 0:
-            session_engine(
-                [
-                    "mark-handled",
-                    args.repo,
-                    args.pr_number,
-                    f"github-thread:{args.thread_id}",
-                    "--note",
-                    "Resolved on GitHub before session sync.",
-                    "--actor",
-                    "resolve_thread",
-                ],
-                check=True,
-            )
+            if not is_unknown_item_error(update.stderr):
+                sys.stderr.write(update.stderr)
+                return update.returncode
         append_handled(args.thread_id, args.repo, args.pr_number)
         payload = json.loads(result.stdout)
         resolved = payload.get("data", {}).get("resolveReviewThread", {}).get("thread", {}).get("isResolved", False)
@@ -91,7 +85,11 @@ def main() -> int:
             args.pr_number,
             args.audit_id,
             "Resolved thread",
-            {"thread_id": args.thread_id, "is_resolved": resolved},
+            {
+                "thread_id": args.thread_id,
+                "is_resolved": resolved,
+                "session_item_missing": bool(update.returncode != 0 and is_unknown_item_error(update.stderr)),
+            },
         )
     else:
         append_handled(args.thread_id)

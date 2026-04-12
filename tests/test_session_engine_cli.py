@@ -40,6 +40,42 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(item["status"], "OPEN")
         self.assertTrue(item["blocking"])
 
+    def test_sync_github_marks_resolved_threads_handled(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        unresolved = json.dumps(
+            [
+                {
+                    "id": "THREAD_RESOLVED",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Please add a null check.",
+                    "url": "https://example.test/thread/resolved",
+                }
+            ]
+        )
+        resolved = json.dumps(
+            [
+                {
+                    "id": "THREAD_RESOLVED",
+                    "isResolved": True,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Please add a null check.",
+                    "url": "https://example.test/thread/resolved",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=unresolved, check=True)
+        self.run_engine("sync-github", self.repo, self.pr, stdin=resolved, check=True)
+
+        session = self.load_session()
+        item = session["items"]["github-thread:THREAD_RESOLVED"]
+        self.assertEqual(item["status"], "CLOSED")
+        self.assertTrue(item["handled"])
+        self.assertIsNotNone(item["handled_at"])
     def test_run_local_review_deduplicates_findings(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         findings = json.dumps(

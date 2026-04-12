@@ -30,6 +30,20 @@ def gh_json(args: list[str]) -> object:
     return json.loads(result.stdout)
 
 
+def load_pr_files(repo: str, pr_number: str) -> list[dict]:
+    files: list[dict] = []
+    page = 1
+    while True:
+        response = gh_json(["api", f"repos/{repo}/pulls/{pr_number}/files", "-F", "per_page=100", "-F", f"page={page}"])
+        if not response:
+            break
+        if not isinstance(response, list):
+            raise SystemExit("Expected a JSON array when listing PR files.")
+        files.extend(response)
+        page += 1
+    return files
+
+
 def compute_diff_position(files: list[dict], target_path: str, target_line: int) -> int:
     patch = None
     for file_entry in files:
@@ -98,7 +112,7 @@ def main() -> int:
         check=True,
     )
     head_sha = head_sha_result.stdout.strip()
-    files = gh_json(["api", f"repos/{args.repo}/pulls/{args.pr}/files", "--paginate"])
+    files = load_pr_files(args.repo, args.pr)
     diff_position = compute_diff_position(files, path_value, int(line_value))
 
     if args.dry_run:
