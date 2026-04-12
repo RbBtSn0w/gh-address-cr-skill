@@ -7,6 +7,40 @@ from pathlib import Path
 from python_common import audit_event, run_cmd
 
 
+def current_login() -> str:
+    response = run_cmd(["gh", "api", "user"], check=True)
+    payload = json.loads(response.stdout)
+    return payload["login"]
+
+
+def submit_pending_reviews(repo: str, pr_number: str, login: str) -> list[int]:
+    response = run_cmd(["gh", "api", f"repos/{repo}/pulls/{pr_number}/reviews"], check=True)
+    reviews = json.loads(response.stdout)
+    submitted: list[int] = []
+    for review in reviews:
+        if review.get("state") != "PENDING":
+            continue
+        if (review.get("user") or {}).get("login") != login:
+            continue
+        review_id = review["id"]
+        run_cmd(
+            [
+                "gh",
+                "api",
+                f"repos/{repo}/pulls/{pr_number}/reviews/{review_id}/events",
+                "-X",
+                "POST",
+                "-f",
+                "event=COMMENT",
+                "-f",
+                "body=Submitting pending automated review replies.",
+            ],
+            check=True,
+        )
+        submitted.append(review_id)
+    return submitted
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Post a reply to a GitHub PR review thread.")
     parser.add_argument("--dry-run", action="store_true")
@@ -53,6 +87,7 @@ def main() -> int:
     if args.repo and args.pr_number:
         payload = json.loads(result.stdout)
         reply_url = payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url", "")
+        submitted_pending_reviews = submit_pending_reviews(args.repo, args.pr_number, current_login())
         audit_event(
             "post_reply",
             "ok",
@@ -60,7 +95,12 @@ def main() -> int:
             args.pr_number,
             args.audit_id,
             "Posted thread reply",
-            {"thread_id": args.thread_id, "reply_file": str(reply_file), "reply_url": reply_url},
+            {
+                "thread_id": args.thread_id,
+                "reply_file": str(reply_file),
+                "reply_url": reply_url,
+                "submitted_pending_reviews": submitted_pending_reviews,
+            },
         )
     return 0
 
