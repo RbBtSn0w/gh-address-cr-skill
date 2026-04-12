@@ -13,16 +13,22 @@ def current_login() -> str:
     return payload["login"]
 
 
-def submit_pending_reviews(repo: str, pr_number: str, login: str) -> list[int]:
+def list_pending_review_ids(repo: str, pr_number: str, login: str) -> set[int]:
     response = run_cmd(["gh", "api", f"repos/{repo}/pulls/{pr_number}/reviews"], check=True)
     reviews = json.loads(response.stdout)
-    submitted: list[int] = []
+    pending: set[int] = set()
     for review in reviews:
         if review.get("state") != "PENDING":
             continue
         if (review.get("user") or {}).get("login") != login:
             continue
-        review_id = review["id"]
+        pending.add(review["id"])
+    return pending
+
+
+def submit_pending_reviews(repo: str, pr_number: str, review_ids: list[int]) -> list[int]:
+    submitted: list[int] = []
+    for review_id in review_ids:
         run_cmd(
             [
                 "gh",
@@ -79,6 +85,11 @@ def main() -> int:
         "mutation($threadId:ID!,$body:String!){ "
         "addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){ comment{ url } } }"
     )
+    pending_before: set[int] = set()
+    login = ""
+    if args.repo and args.pr_number:
+        login = current_login()
+        pending_before = list_pending_review_ids(args.repo, args.pr_number, login)
     result = run_cmd(
         ["gh", "api", "graphql", "-f", f"query={query}", "-F", f"threadId={args.thread_id}", "-F", f"body={reply_body}"],
         check=True,
@@ -87,7 +98,9 @@ def main() -> int:
     if args.repo and args.pr_number:
         payload = json.loads(result.stdout)
         reply_url = payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url", "")
-        submitted_pending_reviews = submit_pending_reviews(args.repo, args.pr_number, current_login())
+        pending_after = list_pending_review_ids(args.repo, args.pr_number, login)
+        new_pending_reviews = sorted(pending_after - pending_before)
+        submitted_pending_reviews = submit_pending_reviews(args.repo, args.pr_number, new_pending_reviews)
         audit_event(
             "post_reply",
             "ok",

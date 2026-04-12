@@ -394,7 +394,7 @@ from pathlib import Path
 
 state_file = Path({str((Path(self.temp_dir.name) / "gh_state.json").as_posix())!r})
 if not state_file.exists():
-    state_file.write_text(json.dumps({{"submitted": []}}))
+    state_file.write_text(json.dumps({{"submitted": [], "review_calls": 0}}))
 
 args = sys.argv[1:]
 if args[:2] == ['api', 'graphql']:
@@ -402,11 +402,14 @@ if args[:2] == ['api', 'graphql']:
 elif args[:2] == ['api', 'user']:
     print(json.dumps({{'login': 'octocat'}}))
 elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews']:
-    if len(args) > 2 and args[2] == '-X':
-        payload = json.loads(state_file.read_text())
-        payload['submitted'].append(args[3])
-        state_file.write_text(json.dumps(payload))
-        print(json.dumps({{'ok': True}}))
+    payload = json.loads(state_file.read_text())
+    payload['review_calls'] += 1
+    state_file.write_text(json.dumps(payload))
+    if payload['review_calls'] == 1:
+        print(json.dumps([
+            {{'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}},
+            {{'id': 303, 'state': 'PENDING', 'user': {{'login': 'someone-else'}}}}
+        ]))
     else:
         print(json.dumps([
             {{'id': 101, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}},
@@ -443,6 +446,61 @@ else:
         self.assertIn("https://example.test/reply", result.stdout)
         state = json.loads((Path(self.temp_dir.name) / "gh_state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["submitted"], ["101"])
+
+    def test_post_reply_does_not_submit_preexisting_pending_review(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+state_file = Path({str((Path(self.temp_dir.name) / "gh_state_existing.json").as_posix())!r})
+if not state_file.exists():
+    state_file.write_text(json.dumps({{"submitted": [], "review_calls": 0}}))
+
+args = sys.argv[1:]
+if args[:2] == ['api', 'graphql']:
+    print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply-existing'}}}}}}}}))
+elif args[:2] == ['api', 'user']:
+    print(json.dumps({{'login': 'octocat'}}))
+elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews']:
+    payload = json.loads(state_file.read_text())
+    payload['review_calls'] += 1
+    state_file.write_text(json.dumps(payload))
+    print(json.dumps([
+        {{'id': 777, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}},
+        {{'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}}
+    ]))
+elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews/777/events']:
+    payload = json.loads(state_file.read_text())
+    payload['submitted'].append('777')
+    state_file.write_text(json.dumps(payload))
+    print(json.dumps({{'ok': True}}))
+else:
+    raise SystemExit(f'unhandled gh args: {{args}}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        reply_file = Path(self.temp_dir.name) / "reply-existing.md"
+        reply_file.write_text("Reply body", encoding="utf-8")
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(POST_REPLY_PY),
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+                "THREAD_REPLY",
+                str(reply_file),
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = json.loads((Path(self.temp_dir.name) / "gh_state_existing.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["submitted"], [])
 
     def test_resolve_thread_python_updates_session(self):
         gh = self.bin_dir / "gh"
