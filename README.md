@@ -1,10 +1,14 @@
 # gh-address-cr skill
 
-An auditable GitHub PR review-comments workflow skill for AI coding agents.
+An auditable PR-session workflow skill for AI coding agents.
 
-It is designed to process CR threads one by one, enforce evidence-first replies,
-and require a final freshness gate before declaring completion.
-For handled threads, replying and resolving are two separate required operations.
+It now treats a Pull Request as the session root and can ingest both:
+
+- GitHub review threads
+- local AI-agent review findings
+
+Both become session items that move through one evidence-first workflow with a final gate.
+For handled GitHub threads, replying and resolving are still two separate required operations.
 
 By default, the skill stores its PR progress + audit artifacts in a user cache directory
 (override with `GH_ADDRESS_CR_STATE_DIR`). If the cache is purged, the workflow can be rebuilt
@@ -13,14 +17,14 @@ from GitHub thread state; the main downside is potential repeated work.
 ## Core Workflow
 
 ```text
-       [ Start PR Review Resolution ]
+       [ Start PR Review Session ]
                    |
                    v
 +-------------------------------------+      (Fetch PR threads, exclude handled)
 |          1. run_once.sh             | <-----------------------------------------+
 +------------------+------------------+                                           |
                    |                                                              |
-                   v [Generates Snapshot & Unresolved List]                       |
+                   v [Generates Snapshot, Syncs Session, Lists Work]              |
                    |                                                              |
 +------------------+------------------+      (THE "BRAIN" STEP: Analyze & Decide) |
 |    2. Analysis & Decision Matrix    |                                           |
@@ -70,6 +74,114 @@ from GitHub thread state; the main downside is potential repeated work.
                [ Done ]
 ```
 
+## PR Session Architecture
+
+`gh-address-cr` now ships a session engine at `gh-address-cr/scripts/session_engine.py`.
+
+The implementation model is now:
+
+- Python owns the stateful logic and GitHub/local-review orchestration.
+- `.sh` files are retained as compatibility entrypoints and mostly forward to Python.
+- `gh-address-cr/scripts/cli.py` is the unified Python dispatcher for the main command set.
+- Tests are organized around Python behavior first, then shell wrapper syntax compatibility.
+
+- `github_thread` items are synced from GraphQL thread snapshots.
+- `local_finding` items are ingested from a local review adapter.
+- local findings can now be explicitly closed in-session with `session_engine.py close-item`.
+- `final_gate.sh` evaluates both:
+  - session blocking item count
+  - unresolved GitHub thread count
+
+The session state is stored next to the existing audit artifacts in the user cache directory:
+
+- session: `...__session.json`
+- audit log: `...__audit.jsonl`
+- audit summary: `...__audit_summary.md`
+
+The session also tracks loop-safety metadata per item:
+
+- `repeat_count`: how many times the same local finding was re-ingested
+- `reopen_count`: how many times a previously closed/deferred/clarified item was reopened
+- claim lease fields so stale ownership can be reclaimed
+
+## Local AI Review Ingestion
+
+Use `scripts/run_local_review.sh` to feed local AI findings into the PR session:
+
+```bash
+scripts/run_local_review.sh --source local-agent:codex owner/repo 123 ./adapter.sh --base main --head HEAD
+```
+
+Adapter contract:
+
+- adapter prints a JSON array to stdout
+- each finding should include `title`, `body`, `path`, `line`
+- optional fields: `severity`, `category`, `confidence`
+
+This path does not auto-post to GitHub. It creates local session items that can be fixed and verified in the same workflow as remote review threads.
+
+To publish a local finding back to GitHub as a review comment:
+
+```bash
+scripts/publish_finding.sh --repo owner/repo --pr 123 local-finding:<fingerprint>
+```
+
+To reclaim expired item claims inside a PR session:
+
+```bash
+python3 gh-address-cr/scripts/session_engine.py reclaim-stale-claims owner/repo 123
+```
+
+## Python-First Script Layout
+
+The main logic now lives in Python under `gh-address-cr/scripts/`:
+
+- `cli.py`
+- `session_engine.py`
+- `python_common.py`
+- `run_once.py`
+- `final_gate.py`
+- `list_threads.py`
+- `post_reply.py`
+- `resolve_thread.py`
+- `run_local_review.py`
+- `publish_finding.py`
+- `mark_handled.py`
+- `audit_report.py`
+- `generate_reply.py`
+- `batch_resolve.py`
+- `clean_state.py`
+
+The matching `.sh` files are kept for backward compatibility with existing skill prompts and operator habits.
+
+Unified CLI examples:
+
+```bash
+python3 gh-address-cr/scripts/cli.py run-once owner/repo 123
+python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean owner/repo 123
+python3 gh-address-cr/scripts/cli.py session-engine gate owner/repo 123
+```
+
+## Testing
+
+Run the current automated checks with:
+
+```bash
+python3 -m unittest discover -s tests
+bash -n gh-address-cr/scripts/*.sh
+```
+
+Current test layout:
+
+- `tests/test_session_engine_cli.py`
+  - PR session state machine and gate behavior
+- `tests/test_python_wrappers.py`
+  - Python entrypoints for GitHub/local-review flows
+- `tests/test_aux_scripts.py`
+  - helper scripts such as reply generation, batch resolve, and state cleanup
+- `tests/helpers.py`
+  - shared test harness
+
 ## Install with npx skills
 
 ```bash
@@ -117,18 +229,22 @@ npx skills update
 
 ## What this skill provides
 
-- Strict per-thread CR handling workflow
+- PR-scoped session state for GitHub threads and local findings
+- Strict per-item CR handling workflow
 - Required evidence format (commit/files/test result)
 - Mandatory final gate (`final_gate.sh`) before completion
-- PR-scoped state tracking to avoid duplicate work
+- Session-scoped state tracking to avoid duplicate work
 - Audit log + audit summary + summary hash output
+- Python-first implementation with shell compatibility wrappers
+- Module-split automated tests for session, wrappers, and helper scripts
 
 ## Skill folder
 
 - `gh-address-cr/`
   - `SKILL.md`
   - `agents/openai.yaml`
-  - `scripts/*.sh`
+  - `scripts/*.py`
+  - `scripts/*.sh` (compat wrappers)
   - `assets/reply-templates/*`
   - `references/cr-triage-checklist.md`
 
@@ -136,10 +252,144 @@ npx skills update
 
 ```bash
 scripts/run_once.sh --audit-id run-YYYYMMDD owner/repo 123
+scripts/run_local_review.sh --source local-agent:codex owner/repo 123 ./adapter.sh
 scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> /tmp/reply.md
 scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
 scripts/final_gate.sh --auto-clean --audit-id run-YYYYMMDD owner/repo 123
 ```
+
+## Operating Modes
+
+This skill supports several distinct operating modes. The session model is the same in all of them, but the required commands differ.
+
+### Mode 1: GitHub Thread Only
+
+Use this when the PR already has remote review threads and there is no local AI review input.
+
+Example:
+
+```bash
+scripts/run_once.sh --audit-id run-20260412 owner/repo 123
+
+# inspect one unresolved GitHub thread
+scripts/generate_reply.sh --mode fix --severity P2 /tmp/reply.md abc123 "src/app.py" "python3 -m unittest" "passed" "Added the missing guard."
+scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID /tmp/reply.md
+scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+
+scripts/final_gate.sh --auto-clean --audit-id run-20260412 owner/repo 123
+```
+
+Rules:
+
+- GitHub thread items require both `post_reply.sh` and `resolve_thread.sh`
+- `final_gate.sh` must pass before completion
+
+### Mode 2: GitHub Thread Clarify / Defer
+
+Use this when the review comment is not accepted as a code change and you need to respond with rationale.
+
+Clarify example:
+
+```bash
+scripts/generate_reply.sh --mode clarify /tmp/reply.md "The current control flow is intentional because initialization must stay lazy."
+scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID /tmp/reply.md
+scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+```
+
+Defer example:
+
+```bash
+scripts/generate_reply.sh --mode defer /tmp/reply.md "This requires broader refactoring and is deferred to a follow-up PR."
+scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID /tmp/reply.md
+scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+```
+
+Rules:
+
+- even without code changes, GitHub thread items still require reply plus resolve
+- defer/clarify should carry rationale, not just a status change
+
+### Mode 3: Local Finding Only
+
+Use this when you want to run local AI review without waiting for GitHub or Copilot review comments.
+
+Example:
+
+```bash
+scripts/run_local_review.sh --source local-agent:codex owner/repo 123 ./adapter.sh
+
+python3 gh-address-cr/scripts/session_engine.py list-items owner/repo 123 --item-kind local_finding --status OPEN
+python3 gh-address-cr/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT ACCEPTED --note "Confirmed locally."
+python3 gh-address-cr/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT FIXED --note "Implemented fix."
+python3 gh-address-cr/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT VERIFIED --note "Validated with targeted tests."
+
+scripts/final_gate.sh --no-auto-clean --audit-id run-20260412 owner/repo 123
+```
+
+Rules:
+
+- local findings do not require GitHub reply/resolve unless you choose to publish them
+- they still participate in the same session gate
+
+### Mode 4: Mixed Session
+
+Use this when the PR has both remote GitHub threads and local AI findings.
+
+Example:
+
+```bash
+scripts/run_once.sh --audit-id run-20260412 owner/repo 123
+scripts/run_local_review.sh --source local-agent:codex owner/repo 123 ./adapter.sh
+
+# process GitHub items with reply + resolve
+# process local items through session_engine.py transitions
+
+scripts/final_gate.sh --no-auto-clean --audit-id run-20260412 owner/repo 123
+```
+
+Rules:
+
+- GitHub items need reply plus resolve
+- local items need valid state transitions and notes
+- the PR is not clear until both session blocking count and unresolved GitHub thread count are zero
+
+### Mode 5: Publish Local Finding Back To GitHub
+
+Use this when a locally discovered issue should become visible in the GitHub PR discussion.
+
+Example:
+
+```bash
+scripts/run_local_review.sh --source local-agent:codex owner/repo 123 ./adapter.sh
+python3 gh-address-cr/scripts/session_engine.py list-items owner/repo 123 --item-kind local_finding --status OPEN
+
+scripts/publish_finding.sh --repo owner/repo --pr 123 local-finding:FINGERPRINT
+scripts/run_once.sh --audit-id run-20260412 owner/repo 123
+```
+
+What happens:
+
+- the local finding is published as a GitHub review comment
+- later GitHub sync can associate the local finding with the resulting thread
+- from that point onward, the issue can be handled like a normal GitHub review item
+
+### Mode 6: Direct Session Engine / Unified CLI
+
+Use this when you need low-level session control or when integrating the skill into other automation.
+
+Examples:
+
+```bash
+python3 gh-address-cr/scripts/cli.py run-once owner/repo 123
+python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean owner/repo 123
+python3 gh-address-cr/scripts/cli.py session-engine list-items owner/repo 123 --item-kind local_finding
+python3 gh-address-cr/scripts/cli.py session-engine reclaim-stale-claims owner/repo 123
+```
+
+Rules:
+
+- `cli.py` is the preferred Python entrypoint for automation
+- `.sh` commands remain the stable compatibility surface for skill users
 
 ## Troubleshooting final gate failure
 

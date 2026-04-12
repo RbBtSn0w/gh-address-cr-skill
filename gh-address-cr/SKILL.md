@@ -1,11 +1,11 @@
 ---
 name: gh-address-cr
-description: Use when resolving GitHub PR review threads that require evidence-first replies, explicit resolve actions, and a mandatory final unresolved-thread gate before completion.
+description: Use when operating on an existing GitHub Pull Request that has remote review threads, local AI review findings, or repeated CR loops that must be tracked in one auditable PR session.
 ---
 
 # gh-address-cr
 
-Use this skill in strict incremental mode to minimize token usage while keeping review quality.
+Use this skill in strict incremental mode to run a PR-scoped CR session with one source of truth.
 
 ## Non-Negotiable Rule
 
@@ -13,20 +13,43 @@ Use this skill in strict incremental mode to minimize token usage while keeping 
 
 - Never output "done", "all resolved", "completed", or equivalent unless:
   - `scripts/final_gate.sh <owner/repo> <pr_number>` has just passed, and
-  - output includes `Verified: 0 Unresolved Threads found`.
+  - output includes `Verified: 0 Unresolved Threads found`, and
+  - session blocking item count is zero.
 - If gate fails, continue iteration; completion summary is forbidden.
 
 ## Core Protocol (Token-Optimized)
 
 1. Run incremental triage first:
    - `scripts/run_once.sh [--audit-id <id>] <owner/repo> <pr_number>`
-2. Process only unresolved + unhandled threads.
-3. For each thread: `understand -> analyze/decide (Accept/Defer/Clarify) -> act (fix code OR write rationale) -> evidence reply -> resolve`. (Note: You MUST resolve the thread on GitHub after replying to pass the final gate).
+2. Optionally ingest local AI review findings:
+   - `scripts/run_local_review.sh [--scan-id <id>] [--source <name>] <owner/repo> <pr_number> <adapter_cmd> [args...]`
+3. Process only unresolved + unhandled GitHub threads and open local findings.
+4. For each item: `understand -> analyze/decide (Accept/Defer/Clarify) -> act (fix code OR write rationale) -> evidence -> close`. For GitHub threads, you MUST still reply and resolve on GitHub.
    - `scripts/post_reply.sh` and `scripts/resolve_thread.sh` are separate atomic operations. Both MUST be executed for handled threads.
-4. Use minimal fixes and targeted tests first.
-5. Before completion message, run hard gate (MANDATORY):
+5. Use minimal fixes and targeted tests first.
+6. Before completion message, run hard gate (MANDATORY):
    - `scripts/final_gate.sh [--auto-clean|--no-auto-clean] [--audit-id <id>] <owner/repo> <pr_number>`
-6. Only if gate passes, send merge-readiness summary.
+7. Only if gate passes, send merge-readiness summary.
+
+## Mode Selection
+
+Choose the workflow based on the item source, not by habit.
+
+- `github_thread` only:
+  - use `run_once.sh`
+  - handle each thread with reply plus resolve
+  - finish with `final_gate.sh`
+- `local_finding` only:
+  - use `run_local_review.sh`
+  - move items through session status updates with notes
+  - do not reply/resolve on GitHub unless you explicitly publish the finding
+- mixed PR session:
+  - run both `run_once.sh` and `run_local_review.sh`
+  - process GitHub items and local items in the same session queue
+  - gate must clear both unresolved GitHub threads and session blocking items
+- publish local finding:
+  - use `scripts/publish_finding.sh --repo <owner/repo> --pr <number> <local_item_id>`
+  - after publication, resync and continue from the session state
 
 ## Decision Matrix (Analysis Phase)
 
@@ -39,7 +62,7 @@ Before modifying code, you MUST analyze the necessity of the CR suggestion:
 
 - Never declare "done" without `final_gate.sh` pass.
 - Never bypass state tracking with ad-hoc batch scripts. Only use `scripts/batch_resolve.sh` with an approved list produced after per-thread analysis and evidence drafting.
-- If unresolved exists, keep iterating; do not send completion summary.
+- If unresolved or blocking session items exist, keep iterating; do not send completion summary.
 - Each mid-run update must include either a pending list or explicit `Verified: 0 Unresolved Threads found`.
 
 ## Completion Output Contract
@@ -48,8 +71,9 @@ Any final completion message must include:
 
 1. `final_gate` command used
 2. gate result line: `Verified: 0 Unresolved Threads found`
-3. unresolved count = 0 confirmation
-4. audit summary path + sha256
+3. unresolved GitHub thread count = 0 confirmation
+4. session blocking count = 0 confirmation
+5. audit summary path + sha256
 
 ## Mandatory Evidence & Rationale
 
@@ -69,7 +93,13 @@ Any final completion message must include:
 
 ## Reusable Resources
 
+- Primary implementation is Python-first. Prefer the stable command names under `scripts/*.sh` for compatibility, but expect those wrappers to dispatch into `scripts/*.py`.
+- Unified Python automation entrypoint: `python3 scripts/cli.py <command> ...`
 - One-shot triage + state snapshot: `scripts/run_once.sh [--show-all] [--audit-id <id>] <owner/repo> <pr_number>`
+- Local review ingestion: `scripts/run_local_review.sh [--scan-id <id>] [--source <name>] <owner/repo> <pr_number> <adapter_cmd> [args...]`
+- Publish a local finding to GitHub review comments: `scripts/publish_finding.sh --repo <owner/repo> --pr <number> <local_item_id>`
+- Close a local or session item after evidence: `python3 scripts/session_engine.py close-item <owner/repo> <pr_number> <item_id> [--note <text>]`
+- Reclaim expired item claims during loops: `python3 scripts/session_engine.py reclaim-stale-claims <owner/repo> <pr_number>`
 - Final completion gate (mandatory): `scripts/final_gate.sh [--auto-clean|--no-auto-clean] [--audit-id <id>] <owner/repo> <pr_number>`
 - Post reply: `scripts/post_reply.sh [--dry-run] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_id> <reply_file>`
 - Resolve thread: `scripts/resolve_thread.sh [--dry-run] [--repo <owner/repo> --pr <number>] [--audit-id <id>] <thread_id>`
@@ -80,6 +110,15 @@ Any final completion message must include:
 - Audit report: `scripts/audit_report.sh <owner/repo> <pr_number>`
 - Templates: `assets/reply-templates/`
 - Reference checklist: `references/cr-triage-checklist.md`
+
+## Implementation Note
+
+- `scripts/cli.py` is the unified Python dispatcher for the main command set.
+- Session logic, GitHub sync, local finding ingestion, reply generation, batch resolve, and cleanup now live in Python implementations under `scripts/*.py`.
+- Shell files remain as compatibility wrappers to avoid breaking existing operator workflows and skill prompts.
+- Current automated checks are:
+  - `python3 -m unittest discover -s tests`
+  - `bash -n gh-address-cr/scripts/*.sh`
 
 ## Troubleshooting `final_gate` Failure
 
@@ -94,17 +133,31 @@ If `scripts/final_gate.sh` fails:
 ## Fast Path
 
 1. `scripts/run_once.sh --audit-id run-20260324 github/spec-kit 1906` to get unresolved threads excluding already-handled IDs.
-2. **Analyze**: Decide whether to Accept, Defer, or Clarify.
-3. Generate reply draft:
+2. Optional local scan:
+   - `scripts/run_local_review.sh --source local-agent:codex github/spec-kit 1906 ./adapter.sh`
+3. **Analyze**: Decide whether to Accept, Defer, or Clarify.
+4. Generate reply draft:
    - If Accepted (Code changed): `scripts/generate_reply.sh --mode fix --severity P2 /tmp/reply.md <commit> "<file1,file2>" "<test_cmd>" "<result>" "<why>"`
    - If Clarified (No code changed): `scripts/generate_reply.sh --mode clarify /tmp/reply.md "<detailed rationale why current logic is correct>"`
    - If Deferred (No code changed): `scripts/generate_reply.sh --mode defer /tmp/reply.md "<detailed rationale why this is deferred>"`
-4. Preview:
+5. Preview:
    - `scripts/post_reply.sh --dry-run <thread_id> /tmp/reply.md`
-5. Execute:
+6. Execute:
    - `scripts/post_reply.sh --repo github/spec-kit --pr 1906 --audit-id run-20260324 <thread_id> /tmp/reply.md`
    - `scripts/resolve_thread.sh --repo github/spec-kit --pr 1906 --audit-id run-20260324 <thread_id>`
-6. Hard gate before completion:
+7. Hard gate before completion:
    - `scripts/final_gate.sh --auto-clean --audit-id run-20260324 github/spec-kit 1906`
+
+## Guidance Check
+
+The intended guidance is:
+
+- use `.sh` command names as the stable operator surface
+- treat `cli.py` as the preferred Python automation entrypoint
+- distinguish GitHub-thread handling from local-finding handling
+- require reply plus resolve only for GitHub review threads
+- require final gate pass before any completion statement
+
+If a future change breaks one of those rules, the skill guidance is wrong and must be updated with the implementation.
 
 State cache lives in a user cache directory by default (override with `GH_ADDRESS_CR_STATE_DIR`) to avoid repeated labor across rounds. If the cache is purged, the workflow can be rebuilt from GitHub thread state; the main downside is potential repeated work.

@@ -1,10 +1,15 @@
 version: 1
 interface:
   display_name: GH Address CR
-  short_description: Process PR review comments with evidence-first fixes and replies.
+  short_description: Operate a PR-scoped CR session across GitHub threads and local review findings.
   default_prompt: |
-    Resolve PR CR comments one by one with evidence-first replies.
-    1. For each handled thread, execute BOTH `scripts/post_reply.sh` and `scripts/resolve_thread.sh` (reply-only is incomplete).
-    2. Before any completion statement, run `scripts/final_gate.sh`.
-    3. Require the exact line: Verified: 0 Unresolved Threads found.
-    4. Completion summary must include the gate command, unresolved=0 confirmation, audit summary path, and audit summary sha256.
+    Operate the PR as a single CR session.
+    1. Sync GitHub review threads with `scripts/run_once.sh`.
+    2. If local AI review is available, ingest it with `scripts/run_local_review.sh`.
+    3. Process GitHub threads and local findings as one queue of session items.
+    4. For GitHub review threads, execute BOTH `scripts/post_reply.sh` and `scripts/resolve_thread.sh` when handling the item.
+    5. For local findings, use session status transitions; do not assume GitHub reply/resolve is required unless the finding is published.
+    6. Before any completion statement, run `scripts/final_gate.sh`.
+    7. Require the exact line: Verified: 0 Unresolved Threads found.
+    8. Completion summary must include the gate command, unresolved GitHub threads = 0, session blocking items = 0, audit summary path, and audit summary sha256.
+    9. Prefer the stable `scripts/*.sh` command names for operator compatibility, but assume they dispatch into Python implementations under `scripts/*.py`.

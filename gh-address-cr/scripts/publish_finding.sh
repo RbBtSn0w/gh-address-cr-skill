@@ -2,4 +2,4 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec python3 "$script_dir/cli.py" list-threads "$@"
+exec python3 "$script_dir/cli.py" publish-finding "$@"
