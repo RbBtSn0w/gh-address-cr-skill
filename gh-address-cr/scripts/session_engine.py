@@ -436,11 +436,9 @@ def cmd_sync_github(args):
     rows = read_records_from_stdin()
     session["current_scan_id"] = args.scan_id or utc_now()
     created = 0
-    touched = []
     for row in rows:
-        item_id, was_created = upsert_github_thread(session, row)
+        _, was_created = upsert_github_thread(session, row)
         created += 1 if was_created else 0
-        touched.append(item_id)
     reconcile_published_findings(session)
     save_session(session)
     append_audit_event(

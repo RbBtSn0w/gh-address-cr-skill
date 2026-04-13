@@ -149,6 +149,7 @@ class SessionEngineCLITest(SessionEngineTestCase):
         gate = self.run_engine("gate", self.repo, self.pr)
         self.assertEqual(gate.returncode, 0, gate.stderr)
         self.assertIn("REMOTE GATE PASS", gate.stdout)
+
     def test_run_local_review_deduplicates_findings(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         findings = json.dumps(
