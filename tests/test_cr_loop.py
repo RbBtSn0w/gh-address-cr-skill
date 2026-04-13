@@ -2,7 +2,7 @@ import json
 import sys
 from pathlib import Path
 
-from tests.helpers import CR_LOOP_PY, PythonScriptTestCase
+from tests.helpers import CR_LOOP_PY, PythonScriptTestCase, SCRIPT
 
 
 class CRLoopCLITest(PythonScriptTestCase):
@@ -256,6 +256,69 @@ print(json.dumps({
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Created 1 local item", result.stdout)
         self.assertIn("cr-loop PASSED", result.stdout)
+
+    def test_cr_loop_does_not_mark_github_thread_needs_human_from_loop_warning_threshold(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+if args[:2] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': [{
+                            'id': 'THREAD_LOOP_THRESHOLD',
+                            'isResolved': False,
+                            'isOutdated': False,
+                            'path': 'src/remote.py',
+                            'line': 17,
+                            'firstComment': {'nodes': [{'url': 'https://example.test/thread/loop-threshold', 'body': 'Remote thread still open.'}]},
+                            'latestComment': {'nodes': [{'url': 'https://example.test/thread/loop-threshold', 'body': 'Remote thread still open.'}]},
+                        }]
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {args}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
+        gh_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_LOOP_THRESHOLD",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/remote.py",
+                    "line": 17,
+                    "body": "Remote thread still open.",
+                    "url": "https://example.test/thread/loop-threshold",
+                }
+            ]
+        )
+        self.run_cmd([sys.executable, str(SCRIPT), "sync-github", self.repo, self.pr], stdin=gh_payload, check=True)
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        item = session["items"]["github-thread:THREAD_LOOP_THRESHOLD"]
+        item["repeat_count"] = 3
+        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        result = self.run_cmd([sys.executable, str(CR_LOOP_PY), "remote", self.repo, self.pr])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("INTERNAL_FIXER_REQUIRED", result.stdout + result.stderr)
+
+        updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"]["github-thread:THREAD_LOOP_THRESHOLD"]
+        self.assertFalse(updated["needs_human"])
 
     def test_cr_loop_mixed_code_review_requires_findings_json(self):
         fixer = Path(self.temp_dir.name) / "fixer.py"

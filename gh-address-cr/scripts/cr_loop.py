@@ -171,7 +171,11 @@ def detect_needs_human(repo: str, pr_number: str, *, run_id: str, iteration: int
                 last_error=item.get("last_auto_failure") or "Item requires human review.",
             )
             return True, item["item_id"]
-        if item.get("blocking") and max(item.get("repeat_count", 0), item.get("reopen_count", 0)) >= engine.LOOP_WARNING_THRESHOLD:
+        if (
+            item.get("item_kind") == "local_finding"
+            and item.get("blocking")
+            and max(item.get("repeat_count", 0), item.get("reopen_count", 0)) >= engine.LOOP_WARNING_THRESHOLD
+        ):
             mark_needs_human(
                 repo,
                 pr_number,

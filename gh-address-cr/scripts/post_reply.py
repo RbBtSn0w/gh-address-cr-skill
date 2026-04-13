@@ -100,8 +100,7 @@ def main() -> int:
         payload = json.loads(result.stdout)
         reply_url = payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url", "")
         pending_after = list_pending_review_ids(args.repo, args.pr_number, login)
-        new_pending_reviews = sorted(pending_after - pending_before)
-        submitted_pending_reviews = submit_pending_reviews(args.repo, args.pr_number, new_pending_reviews)
+        submitted_pending_reviews = submit_pending_reviews(args.repo, args.pr_number, sorted(pending_after))
         audit_event(
             "post_reply",
             "ok",
@@ -113,6 +112,8 @@ def main() -> int:
                 "thread_id": args.thread_id,
                 "reply_file": str(reply_file),
                 "reply_url": reply_url,
+                "pending_reviews_before": sorted(pending_before),
+                "pending_reviews_after": sorted(pending_after),
                 "submitted_pending_reviews": submitted_pending_reviews,
             },
         )

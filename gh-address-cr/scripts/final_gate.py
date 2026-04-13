@@ -47,6 +47,14 @@ def main() -> int:
     print(f"Unresolved thread count: {unresolved_count}")
 
     if gate.returncode != 0:
+        failure_reasons = []
+        if unresolved_count:
+            failure_reasons.append(f"{unresolved_count} unresolved thread(s)")
+        if blocking_count:
+            failure_reasons.append(f"{blocking_count} blocking item(s)")
+        if not failure_reasons:
+            failure_reasons.append("gate checks reported failure")
+        failure_message = f"Gate failed; {' and '.join(failure_reasons)} remain"
         print()
         print("== Pending Review Table ==")
         items = session_engine(["list-items", args.repo, args.pr_number], check=True)
@@ -69,7 +77,7 @@ def main() -> int:
             args.repo,
             args.pr_number,
             args.audit_id,
-            "Gate failed; unresolved threads remain",
+            failure_message,
             {
                 "unresolved_count": unresolved_count,
                 "blocking_count": blocking_count,

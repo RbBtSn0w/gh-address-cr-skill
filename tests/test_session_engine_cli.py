@@ -842,6 +842,52 @@ class SessionEngineCLITest(SessionEngineTestCase):
         session = self.load_session()
         item = session["items"]["github-thread:THREAD_DROPPED"]
         self.assertEqual(item["status"], "DROPPED")
+
+    def test_sync_github_preserves_stale_thread_until_resolved(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        initial_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_MANUAL_STALE",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/map.py",
+                    "line": 16,
+                    "body": "Will be marked stale locally.",
+                    "url": "https://example.test/comment/manual-stale",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=initial_payload, check=True)
+        self.run_engine(
+            "update-item",
+            self.repo,
+            self.pr,
+            "github-thread:THREAD_MANUAL_STALE",
+            "STALE",
+            "--note",
+            "Manually parked pending later follow-up.",
+            check=True,
+        )
+
+        refreshed_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_MANUAL_STALE",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/map.py",
+                    "line": 16,
+                    "body": "Still open on GitHub.",
+                    "url": "https://example.test/comment/manual-stale",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=refreshed_payload, check=True)
+
+        session = self.load_session()
+        item = session["items"]["github-thread:THREAD_MANUAL_STALE"]
+        self.assertEqual(item["status"], "STALE")
         self.assertFalse(item["blocking"])
 
     def test_gate_fails_when_loop_threshold_is_exceeded(self):

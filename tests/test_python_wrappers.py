@@ -1000,7 +1000,60 @@ else:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         state = json.loads((Path(self.temp_dir.name) / "gh_state_existing.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["submitted"], [])
+        self.assertEqual(state["submitted"], ["777"])
+
+    def test_final_gate_failure_message_reports_actual_failure_reasons(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
+        payload = json.dumps(
+            [
+                {
+                    "title": "Blocking finding",
+                    "body": "Still open.",
+                    "path": "src/blocking.py",
+                    "line": 3,
+                    "severity": "P2",
+                    "category": "correctness",
+                }
+            ]
+        )
+        self.run_cmd(
+            [sys.executable, str(SCRIPT), "ingest-local", self.repo, self.pr, "--source", "local-agent:test"],
+            stdin=payload,
+            check=True,
+        )
+
+        result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", self.repo, self.pr])
+        self.assertNotEqual(result.returncode, 0)
+        audit_lines = self.audit_log_file().read_text(encoding="utf-8").splitlines()
+        last = json.loads(audit_lines[-1])
+        self.assertEqual(last["status"], "failed")
+        self.assertEqual(last["message"], "Gate failed; 1 blocking item(s) remain")
 
     def test_resolve_thread_python_updates_session(self):
         gh = self.bin_dir / "gh"
