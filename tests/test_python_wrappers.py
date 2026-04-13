@@ -362,7 +362,7 @@ raise SystemExit(1)
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("Created 1 local item", result.stdout)
 
-        session_file = self.state_dir / "octo__example__pr77__session.json"
+        session_file = self.session_file()
         self.assertFalse(session_file.exists())
 
     def test_control_plane_mixed_code_review_accepts_dash_input_from_stdin(self):
@@ -490,8 +490,10 @@ else:
         self.assertIn("emit findings json", " ".join(payload["instructions"]).lower())
         self.assertIn("code-review-adapter", payload["adapter_backend"])
         self.assertIn("control-plane mixed code-review", payload["ingest_command"])
-        self.assertIn("__artifacts", payload["artifacts_dir"])
-        self.assertIn("__artifacts", payload["recommended_findings_path"])
+        self.assertIn("/octo__example/pr-77", payload["workspace_dir"])
+        self.assertTrue(payload["findings_output_path"].endswith("/octo__example/pr-77/code-review-findings.json"))
+        self.assertTrue(payload["reply_output_path"].endswith("/octo__example/pr-77/reply.md"))
+        self.assertTrue(payload["loop_request_path"].endswith("/octo__example/pr-77/loop-request.json"))
 
     def test_code_review_adapter_normalizes_findings(self):
         payload = json.dumps(
@@ -1057,7 +1059,7 @@ else:
             ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        session = json.loads((self.state_dir / "octo__example__pr77__session.json").read_text(encoding="utf-8"))
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
         item = session["items"]["github-thread:THREAD_RESOLVE"]
         self.assertEqual(item["status"], "CLOSED")
         self.assertTrue(item["handled"])
@@ -1099,5 +1101,5 @@ else:
             ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        handled_file = self.state_dir / "octo__example__pr77__handled_threads.txt"
+        handled_file = self.github_dir() / "handled_threads.txt"
         self.assertIn("THREAD_ONLY_REMOTE", handled_file.read_text(encoding="utf-8"))

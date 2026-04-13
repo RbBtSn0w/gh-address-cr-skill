@@ -138,7 +138,7 @@ from GitHub thread state; the main downside is potential repeated work.
          |                   |                       |                            |
          +---------+---------+-----------------------+                            |
                    |                                                              |
-                   v [Generates /tmp/reply.md]                                    |
+                   v [Generates reply markdown in the PR workspace]               |
                    |                                                              |
 +------------------+------------------+      (GitHub API: Reply)                  |
 |         5. post_reply.sh            |                                           |
@@ -180,12 +180,18 @@ The implementation model is now:
   - session blocking item count
   - unresolved GitHub thread count
 
-The session state is stored next to the existing audit artifacts in the user cache directory:
+The session state is stored in a PR-scoped workspace under the user cache directory:
 
-- session: `...__session.json`
-- audit log: `...__audit.jsonl`
-- audit summary: `...__audit_summary.md`
-- artifacts: `...__artifacts/`
+- workspace: `<owner>__<repo>/pr-<pr>/`
+- session: `session.json`
+- GitHub snapshots: `threads.jsonl`
+- handled threads: `handled_threads.txt`
+- audit log: `audit.jsonl`
+- audit summary: `audit_summary.md`
+- findings: `findings-*.json` and `code-review-findings.json`
+- replies: `reply-*.md`
+- loop requests: `loop-request-*.json`
+- validation records: `validation-*.json`
 
 The session also tracks loop-safety metadata per item:
 
@@ -218,8 +224,10 @@ cat findings.json | python3 gh-address-cr/scripts/cli.py control-plane mixed cod
 
 `prepare-code-review` now also returns:
 
-- `artifacts_dir`
-- `recommended_findings_path`
+- `workspace_dir`
+- `findings_output_path`
+- `reply_output_path`
+- `loop_request_path`
 
 Use that cache-backed findings path instead of creating review artifacts in the project workspace.
 
@@ -393,7 +401,7 @@ npx skills update
 ```bash
 scripts/run_once.sh --audit-id run-YYYYMMDD owner/repo 123
 scripts/run_local_review.sh --source local-agent:codex owner/repo 123 ./adapter.sh
-scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> /tmp/reply.md
+scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
 scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
 scripts/final_gate.sh --auto-clean --audit-id run-YYYYMMDD owner/repo 123
 ```
@@ -412,8 +420,8 @@ Example:
 scripts/run_once.sh --audit-id run-20260412 owner/repo 123
 
 # inspect one unresolved GitHub thread
-scripts/generate_reply.sh --mode fix --severity P2 /tmp/reply.md abc123 "src/app.py" "python3 -m unittest" "passed" "Added the missing guard."
-scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID /tmp/reply.md
+scripts/generate_reply.sh --mode fix --severity P2 "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" abc123 "src/app.py" "python3 -m unittest" "passed" "Added the missing guard."
+scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
 scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
 
 scripts/final_gate.sh --auto-clean --audit-id run-20260412 owner/repo 123
@@ -431,16 +439,16 @@ Use this when the review comment is not accepted as a code change and you need t
 Clarify example:
 
 ```bash
-scripts/generate_reply.sh --mode clarify /tmp/reply.md "The current control flow is intentional because initialization must stay lazy."
-scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID /tmp/reply.md
+scripts/generate_reply.sh --mode clarify "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "The current control flow is intentional because initialization must stay lazy."
+scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
 scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
 ```
 
 Defer example:
 
 ```bash
-scripts/generate_reply.sh --mode defer /tmp/reply.md "This requires broader refactoring and is deferred to a follow-up PR."
-scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID /tmp/reply.md
+scripts/generate_reply.sh --mode defer "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "This requires broader refactoring and is deferred to a follow-up PR."
+scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
 scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
 ```
 

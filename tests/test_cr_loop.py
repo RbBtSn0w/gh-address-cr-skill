@@ -7,7 +7,7 @@ from tests.helpers import CR_LOOP_PY, PythonScriptTestCase
 
 class CRLoopCLITest(PythonScriptTestCase):
     def artifacts_dir(self) -> Path:
-        return self.state_dir / f"{self.repo.replace('/', '__')}__pr{self.pr}__artifacts"
+        return super().artifacts_dir()
 
     def test_cr_loop_local_json_fix_passes_gate(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
@@ -59,8 +59,7 @@ print(json.dumps({
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("cr-loop PASSED", result.stdout)
 
-        session_file = self.state_dir / "octo__example__pr77__session.json"
-        session = json.loads(session_file.read_text(encoding="utf-8"))
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
         self.assertEqual(session["loop_state"]["status"], "PASSED")
         self.assertEqual(session["loop_state"]["iteration"], 1)
 
@@ -203,8 +202,7 @@ print(json.dumps({
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("NEEDS_HUMAN", result.stdout + result.stderr)
 
-        session_file = self.state_dir / "octo__example__pr77__session.json"
-        session = json.loads(session_file.read_text(encoding="utf-8"))
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
         item = next(value for value in session["items"].values() if value["item_kind"] == "local_finding")
         self.assertTrue(item["needs_human"])
         self.assertEqual(session["loop_state"]["status"], "NEEDS_HUMAN")
@@ -324,7 +322,7 @@ print(json.dumps({
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("INTERNAL_FIXER_REQUIRED", result.stdout + result.stderr)
 
-        artifacts = sorted(self.artifacts_dir().glob("internal-fixer-request-*.json"))
+        artifacts = sorted(self.artifacts_dir().glob("loop-request-*.json"))
         self.assertEqual(len(artifacts), 1)
         payload = json.loads(artifacts[0].read_text(encoding="utf-8"))
         self.assertEqual(payload["repo"], self.repo)

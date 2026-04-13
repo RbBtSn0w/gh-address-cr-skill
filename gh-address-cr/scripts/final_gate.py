@@ -2,10 +2,11 @@
 from __future__ import annotations
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
-from python_common import audit_event, audit_summary_file, list_threads, session_engine, sha256_of_file, snapshot_file, state_dir
+from python_common import audit_event, audit_summary_file, list_threads, session_engine, sha256_of_file, snapshot_file, workspace_dir
 
 
 def main() -> int:
@@ -103,21 +104,9 @@ def main() -> int:
     )
 
     if args.auto_clean:
-        repo_key = args.repo.replace("/", "__")
-        base = state_dir()
-        for suffix in [
-            f"{repo_key}__pr{args.pr_number}__session.json",
-            f"{repo_key}__pr{args.pr_number}__threads.jsonl",
-            f"{repo_key}__pr{args.pr_number}__threads.jsonl.prev",
-            f"{repo_key}__pr{args.pr_number}__handled_threads.txt",
-            f"{repo_key}__pr{args.pr_number}__current_unresolved_ids.txt",
-            f"{repo_key}__pr{args.pr_number}__prev_unresolved_ids.txt",
-            f"{repo_key}__pr{args.pr_number}__new_unresolved_ids.txt",
-        ]:
-            path = base / suffix
-            if path.exists():
-                path.unlink()
-        print("Auto-cleaned PR state snapshot files.")
+        workspace = workspace_dir(args.repo, args.pr_number)
+        shutil.rmtree(workspace, ignore_errors=True)
+        print(f"Auto-cleaned PR workspace: {workspace}")
         audit_event("final_gate", "ok", args.repo, args.pr_number, args.audit_id, "Auto-clean completed after gate pass")
     return 0
 

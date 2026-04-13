@@ -16,8 +16,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Resolve a batch of approved GitHub review threads.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--yes", action="store_true")
-    parser.add_argument("--repo", default="")
-    parser.add_argument("--pr", dest="pr_number", default="")
+    parser.add_argument("--repo", required=True)
+    parser.add_argument("--pr", dest="pr_number", required=True)
     parser.add_argument("--audit-id", default="default")
     parser.add_argument("approved_threads_file")
     return parser.parse_args()
@@ -45,8 +45,7 @@ def main() -> int:
         cmd = [sys.executable, str(RESOLVE_THREAD)]
         if args.dry_run:
             cmd.append("--dry-run")
-        if args.repo and args.pr_number:
-            cmd.extend(["--repo", args.repo, "--pr", args.pr_number, "--audit-id", args.audit_id])
+        cmd.extend(["--repo", args.repo, "--pr", args.pr_number, "--audit-id", args.audit_id])
         cmd.append(thread_id)
         result = subprocess.run(cmd, text=True, capture_output=True)
         if result.stdout:

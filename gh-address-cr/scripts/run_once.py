@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from python_common import audit_event, list_threads, normalize_repo, session_engine, session_file, snapshot_file, state_dir
+from python_common import audit_event, list_threads, previous_snapshot_file, session_engine, session_file, snapshot_file
 
 
 def unresolved_ids_from_snapshot_text(snapshot_text: str) -> list[str]:
@@ -25,13 +25,8 @@ def main() -> int:
     parser.add_argument("pr_number")
     args = parser.parse_args()
 
-    repo_key = normalize_repo(args.repo)
-    base = state_dir()
     snapshot = snapshot_file(args.repo, args.pr_number)
-    prev_snapshot = snapshot.with_suffix(snapshot.suffix + ".prev")
-    curr_ids = base / f"{repo_key}__pr{args.pr_number}__current_unresolved_ids.txt"
-    prev_ids = base / f"{repo_key}__pr{args.pr_number}__prev_unresolved_ids.txt"
-    new_ids = base / f"{repo_key}__pr{args.pr_number}__new_unresolved_ids.txt"
+    prev_snapshot = previous_snapshot_file(args.repo, args.pr_number)
 
     audit_event("run_once", "start", args.repo, args.pr_number, args.audit_id, "Starting triage snapshot")
 
@@ -59,16 +54,11 @@ def main() -> int:
         print(list_result.stdout.rstrip())
 
     unresolved_ids = sorted({row["id"] for row in threads if not row["isResolved"]})
-    curr_ids.write_text("\n".join(unresolved_ids) + ("\n" if unresolved_ids else ""), encoding="utf-8")
-
     if prev_snapshot.exists():
         previous = unresolved_ids_from_snapshot_text(prev_snapshot.read_text(encoding="utf-8"))
-        prev_ids.write_text("\n".join(previous) + ("\n" if previous else ""), encoding="utf-8")
         newly_appeared = [item_id for item_id in unresolved_ids if item_id not in set(previous)]
     else:
-        new_ids.write_text("", encoding="utf-8")
         newly_appeared = []
-    new_ids.write_text("\n".join(newly_appeared) + ("\n" if newly_appeared else ""), encoding="utf-8")
 
     print()
     print("== Newly Appeared Unresolved Threads Since Last Snapshot ==")

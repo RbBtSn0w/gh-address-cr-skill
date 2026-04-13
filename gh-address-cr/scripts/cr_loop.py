@@ -5,11 +5,11 @@ import json
 import shlex
 import subprocess
 import sys
-import tempfile
+import uuid
 from pathlib import Path
 
 import session_engine as engine
-from python_common import artifacts_dir
+from python_common import findings_file, loop_artifact_file, reply_file, validation_file
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -231,13 +231,12 @@ def run_intake(args: argparse.Namespace, producer: str | None, repo: str, pr_num
             if iteration > 1:
                 return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
             input_arg = args.input
-            temp_input_path: Path | None = None
+            persisted_input_path: Path | None = None
             try:
                 if stdin_payload is not None:
-                    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
-                        handle.write(stdin_payload)
-                        temp_input_path = Path(handle.name)
-                    input_arg = str(temp_input_path)
+                    persisted_input_path = findings_file(repo, pr_number, f"findings-stdin-code-review-{uuid.uuid4().hex}.json")
+                    persisted_input_path.write_text(stdin_payload, encoding="utf-8")
+                    input_arg = str(persisted_input_path)
                 cmd = [sys.executable, str(RUN_LOCAL_REVIEW)]
                 if args.scan_id:
                     cmd.extend(["--scan-id", args.scan_id])
@@ -245,8 +244,8 @@ def run_intake(args: argparse.Namespace, producer: str | None, repo: str, pr_num
                 cmd.extend([repo, pr_number, sys.executable, str(CODE_REVIEW_ADAPTER), "--input", input_arg or "-"])
                 return run_cmd(cmd)
             finally:
-                if temp_input_path and temp_input_path.exists():
-                    temp_input_path.unlink()
+                if persisted_input_path and persisted_input_path.exists():
+                    persisted_input_path.unlink()
     return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
 
@@ -263,7 +262,7 @@ def run_fixer(fixer_cmd: str, payload: dict) -> tuple[dict | None, str]:
 
 def write_internal_fixer_request(repo: str, pr_number: str, *, run_id: str, iteration: int, payload: dict) -> Path:
     safe_item_id = payload["item"]["item_id"].replace("/", "_").replace(":", "_")
-    request_path = artifacts_dir(repo, pr_number) / f"internal-fixer-request-{run_id}-iter{iteration}-{safe_item_id}.json"
+    request_path = loop_artifact_file(repo, pr_number, f"loop-request-{run_id}-iter{iteration}-{safe_item_id}.json")
     request = {
         "mode": "internal-fixer",
         "repo": repo,
@@ -290,6 +289,37 @@ def run_validation(commands: list[str]) -> tuple[bool, str]:
             output = (result.stdout or "") + (result.stderr or "")
             return False, f"Validation failed: {command}\n{output}".strip()
     return True, ""
+
+
+def write_validation_record(
+    repo: str,
+    pr_number: str,
+    *,
+    run_id: str,
+    iteration: int,
+    item_id: str,
+    commands: list[str],
+    ok: bool,
+    error: str,
+) -> None:
+    safe_item_id = item_id.replace("/", "_").replace(":", "_")
+    record_path = validation_file(repo, pr_number, f"validation-{run_id}-iter{iteration}-{safe_item_id}.json")
+    record_path.write_text(
+        json.dumps(
+            {
+                "item_id": item_id,
+                "run_id": run_id,
+                "iteration": iteration,
+                "commands": commands,
+                "ok": ok,
+                "error": error,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def release_item_for_retry(repo: str, pr_number: str, item_id: str, reason: str):
@@ -351,6 +381,16 @@ def handle_item(args: argparse.Namespace, repo: str, pr_number: str, item: dict,
     validation_commands = list(action.get("validation_commands") or []) + list(args.validation_cmd or [])
     if resolution == "fix" and validation_commands:
         ok, validation_error = run_validation(validation_commands)
+        write_validation_record(
+            repo,
+            pr_number,
+            run_id=run_id,
+            iteration=iteration,
+            item_id=item["item_id"],
+            commands=validation_commands,
+            ok=ok,
+            error=validation_error,
+        )
         if not ok:
             session = engine.load_session(repo, pr_number)
             current = engine.ensure_item(session, item["item_id"])
@@ -376,7 +416,7 @@ def handle_item(args: argparse.Namespace, repo: str, pr_number: str, item: dict,
             mark_needs_human(repo, pr_number, item["item_id"], error, run_id=run_id, iteration=iteration, max_iterations=args.max_iterations)
             return "needs_human", error
         thread_id = item["origin_ref"]
-        reply_path = artifacts_dir(repo, pr_number) / f"reply-{run_id}-iter{iteration}-{thread_id}.md"
+        reply_path = reply_file(repo, pr_number, f"reply-{run_id}-iter{iteration}-{thread_id}.md")
         reply_path.write_text(reply_markdown, encoding="utf-8")
         try:
             result = run_cmd([sys.executable, str(POST_REPLY), "--repo", repo, "--pr", pr_number, "--audit-id", run_id, thread_id, str(reply_path)])

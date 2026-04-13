@@ -3,10 +3,10 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
-
+import uuid
+from python_common import findings_file
 SCRIPT_DIR = Path(__file__).resolve().parent
 RUN_ONCE = SCRIPT_DIR / "run_once.py"
 RUN_LOCAL_REVIEW = SCRIPT_DIR / "run_local_review.py"
@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
 
     source = args.source or (f"local-agent:{producer}" if producer else "")
     stdin_payload = None
-    temp_input_path: Path | None = None
+    persisted_input_path: Path | None = None
 
     if args.mode in {"local", "mixed", "ingest"}:
         if producer == "adapter":
@@ -140,10 +140,9 @@ def main(argv: list[str] | None = None) -> int:
             elif producer == "code-review":
                 input_arg = args.input
                 if stdin_payload is not None:
-                    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
-                        handle.write(stdin_payload)
-                        temp_input_path = Path(handle.name)
-                    input_arg = str(temp_input_path)
+                    persisted_input_path = findings_file(repo, pr_number, f"findings-stdin-code-review-{uuid.uuid4().hex}.json")
+                    persisted_input_path.write_text(stdin_payload, encoding="utf-8")
+                    input_arg = str(persisted_input_path)
                 cmd = [sys.executable, str(RUN_LOCAL_REVIEW)]
                 if args.scan_id:
                     cmd.extend(["--scan-id", args.scan_id])
@@ -186,8 +185,8 @@ def main(argv: list[str] | None = None) -> int:
 
         return 0
     finally:
-        if temp_input_path and temp_input_path.exists():
-            temp_input_path.unlink()
+        if persisted_input_path and persisted_input_path.exists():
+            persisted_input_path.unlink()
 
 
 if __name__ == "__main__":

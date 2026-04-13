@@ -10,6 +10,8 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from python_common import audit_log_file, audit_summary_file, session_file, state_dir
+
 
 SCHEMA_VERSION = 1
 DEFAULT_CLAIM_MINUTES = 30
@@ -39,25 +41,6 @@ def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def repo_key(repo: str) -> str:
-    return repo.replace("/", "__")
-
-
-def state_dir() -> Path:
-    override = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
-    if override:
-        return Path(override)
-
-    home = os.environ.get("HOME")
-    if sys.platform == "darwin":
-        base = os.environ.get("XDG_CACHE_HOME") or (f"{home}/Library/Caches" if home else None)
-    else:
-        base = os.environ.get("XDG_CACHE_HOME") or (f"{home}/.cache" if home else None)
-    if not base:
-        raise SystemExit("Unable to determine state directory. Set GH_ADDRESS_CR_STATE_DIR.")
-    return Path(base) / "gh-address-cr"
-
-
 def ensure_state_dir() -> Path:
     path = state_dir()
     path.mkdir(parents=True, exist_ok=True)
@@ -65,15 +48,18 @@ def ensure_state_dir() -> Path:
 
 
 def session_path(repo: str, pr_number: str) -> Path:
-    return ensure_state_dir() / f"{repo_key(repo)}__pr{pr_number}__session.json"
+    ensure_state_dir()
+    return session_file(repo, pr_number)
 
 
 def audit_log_path(repo: str, pr_number: str) -> Path:
-    return ensure_state_dir() / f"{repo_key(repo)}__pr{pr_number}__audit.jsonl"
+    ensure_state_dir()
+    return audit_log_file(repo, pr_number)
 
 
 def summary_path(repo: str, pr_number: str) -> Path:
-    return ensure_state_dir() / f"{repo_key(repo)}__pr{pr_number}__audit_summary.md"
+    ensure_state_dir()
+    return audit_summary_file(repo, pr_number)
 
 
 def sha256_of_file(path: Path) -> str:

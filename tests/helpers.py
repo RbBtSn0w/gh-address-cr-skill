@@ -54,8 +54,11 @@ class SessionEngineTestCase(unittest.TestCase):
             check=check,
         )
 
+    def workspace_dir(self):
+        return self.state_dir / "octo__example" / f"pr-{self.pr}"
+
     def session_file(self):
-        return self.state_dir / "octo__example__pr42__session.json"
+        return self.workspace_dir() / "session.json"
 
     def load_session(self):
         return json.loads(self.session_file().read_text(encoding="utf-8"))
@@ -87,3 +90,21 @@ class PythonScriptTestCase(unittest.TestCase):
             env=self.env,
             check=check,
         )
+
+    def workspace_dir(self):
+        return self.state_dir / "octo__example" / f"pr-{self.pr}"
+
+    def session_file(self):
+        return self.workspace_dir() / "session.json"
+
+    def audit_log_file(self):
+        return self.workspace_dir() / "audit.jsonl"
+
+    def audit_summary_file(self):
+        return self.workspace_dir() / "audit_summary.md"
+
+    def github_dir(self):
+        return self.workspace_dir()
+
+    def artifacts_dir(self):
+        return self.workspace_dir()

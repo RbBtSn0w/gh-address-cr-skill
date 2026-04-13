@@ -73,6 +73,10 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
                 sys.executable,
                 str(BATCH_RESOLVE_PY),
                 "--dry-run",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
                 str(approved),
             ]
         )
@@ -88,6 +92,10 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
                 sys.executable,
                 str(BATCH_RESOLVE_PY),
                 "--dry-run",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
                 str(approved),
             ]
         )
@@ -95,12 +103,14 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertIn("Expected format: APPROVED <thread_id>", result.stderr)
 
     def test_clean_state_removes_pr_scoped_files(self):
-        repo_key = self.repo.replace("/", "__")
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        session_file = self.state_dir / f"{repo_key}__pr{self.pr}__session.json"
-        audit_file = self.state_dir / f"{repo_key}__pr{self.pr}__audit.jsonl"
-        summary_file = self.state_dir / f"{repo_key}__pr{self.pr}__audit_summary.md"
-        artifacts_dir = self.state_dir / f"{repo_key}__pr{self.pr}__artifacts"
+        session_file = self.session_file()
+        audit_file = self.audit_log_file()
+        summary_file = self.audit_summary_file()
+        artifacts_dir = self.artifacts_dir()
+        session_file.parent.mkdir(parents=True, exist_ok=True)
+        audit_file.parent.mkdir(parents=True, exist_ok=True)
+        summary_file.parent.mkdir(parents=True, exist_ok=True)
         session_file.write_text("{}", encoding="utf-8")
         audit_file.write_text("{}\n", encoding="utf-8")
         summary_file.write_text("summary", encoding="utf-8")

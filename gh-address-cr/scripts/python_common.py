@@ -36,30 +36,50 @@ def normalize_repo(repo: str) -> str:
     return repo.replace("/", "__")
 
 
+def workspace_dir(repo: str, pr_number: str) -> Path:
+    path = state_dir() / normalize_repo(repo) / f"pr-{pr_number}"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def snapshot_file(repo: str, pr_number: str) -> Path:
-    return state_dir() / f"{normalize_repo(repo)}__pr{pr_number}__threads.jsonl"
+    return workspace_dir(repo, pr_number) / "threads.jsonl"
+
+
+def previous_snapshot_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "threads.prev.jsonl"
 
 
 def session_file(repo: str, pr_number: str) -> Path:
-    return state_dir() / f"{normalize_repo(repo)}__pr{pr_number}__session.json"
+    return workspace_dir(repo, pr_number) / "session.json"
 
 
 def audit_log_file(repo: str, pr_number: str) -> Path:
-    return state_dir() / f"{normalize_repo(repo)}__pr{pr_number}__audit.jsonl"
+    return workspace_dir(repo, pr_number) / "audit.jsonl"
 
 
 def audit_summary_file(repo: str, pr_number: str) -> Path:
-    return state_dir() / f"{normalize_repo(repo)}__pr{pr_number}__audit_summary.md"
+    return workspace_dir(repo, pr_number) / "audit_summary.md"
 
 
 def handled_threads_file(repo: str, pr_number: str) -> Path:
-    return state_dir() / f"{normalize_repo(repo)}__pr{pr_number}__handled_threads.txt"
+    return workspace_dir(repo, pr_number) / "handled_threads.txt"
 
 
-def artifacts_dir(repo: str, pr_number: str) -> Path:
-    path = state_dir() / f"{normalize_repo(repo)}__pr{pr_number}__artifacts"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def findings_file(repo: str, pr_number: str, name: str = "code-review-findings.json") -> Path:
+    return workspace_dir(repo, pr_number) / name
+
+
+def reply_file(repo: str, pr_number: str, name: str) -> Path:
+    return workspace_dir(repo, pr_number) / name
+
+
+def loop_artifact_file(repo: str, pr_number: str, name: str) -> Path:
+    return workspace_dir(repo, pr_number) / name
+
+
+def validation_file(repo: str, pr_number: str, name: str) -> Path:
+    return workspace_dir(repo, pr_number) / name
 
 
 def sha256_of_file(path: Path) -> str:
