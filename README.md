@@ -222,6 +222,12 @@ python3 gh-address-cr/scripts/cli.py prepare-code-review mixed owner/repo 123
 cat findings.json | python3 gh-address-cr/scripts/cli.py control-plane mixed code-review --input - owner/repo 123
 ```
 
+Input rule:
+
+- if you already have a real findings JSON file from another tool, use `--input <path>`
+- if findings are being produced in the current step, prefer `--input -` and pipe them over `stdin`
+- do not create ad-hoc temporary findings files in the project workspace just to drive the workflow
+
 `prepare-code-review` now also returns:
 
 - `workspace_dir`
@@ -249,6 +255,19 @@ Field normalization is intentionally broad so external tools can map in without 
 - `line` or `start_line` or `position`
 - `title` or `rule` or `check`
 - `body` or `message` or `description`
+
+Minimum accepted finding shape:
+
+```json
+[
+  {
+    "title": "Missing null guard",
+    "body": "Potential null dereference.",
+    "path": "src/example.py",
+    "line": 12
+  }
+]
+```
 
 This is the long-term integration path for any local code-review tool. If it can emit structured findings JSON, `gh-address-cr` can ingest it into the PR session.
 
@@ -305,8 +324,8 @@ python3 gh-address-cr/scripts/cli.py run-once owner/repo 123
 python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean owner/repo 123
 python3 gh-address-cr/scripts/cli.py session-engine gate owner/repo 123
 python3 gh-address-cr/scripts/cli.py ingest-findings --source local-agent:code-review owner/repo 123 --input findings.json
-python3 gh-address-cr/scripts/cli.py control-plane mixed code-review --input findings.json owner/repo 123
-python3 gh-address-cr/scripts/cli.py cr-loop local json owner/repo 123 --input findings.json
+python3 gh-address-cr/scripts/cli.py control-plane mixed code-review --input - owner/repo 123
+python3 gh-address-cr/scripts/cli.py cr-loop local json owner/repo 123 --input -
 python3 gh-address-cr/scripts/cli.py session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally."
 ```
 

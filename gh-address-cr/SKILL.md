@@ -60,6 +60,8 @@ For `producer=code-review`, the execution model is:
 
 - generate the bridge prompt with `prepare-code-review`
 - run the external review step and produce findings JSON first
+- if findings already exist as a real file, pass that file with `--input <path>`
+- if findings are being produced in the current step, prefer piping them through `stdin` with `--input -`
 - let `control-plane` pass that JSON through the built-in `code-review-adapter`
 
 Do not assume `gh-address-cr` directly runs another review skill by itself. The review step is still external; the intake path is now adapter-backed and stable.
@@ -117,6 +119,19 @@ Use `cr-loop` when you want `gh-address-cr` to run multiple iterations automatic
   - `body`
   - `path`
   - `line`
+- Accepted findings input shapes:
+  - JSON array of finding objects
+  - JSON object with `findings`, `issues`, or `results`
+  - NDJSON, one finding object per line
+- Accepted field aliases:
+  - `path` or `file` or `filename`
+  - `line` or `start_line` or `position`
+  - `title` or `rule` or `check`
+  - `body` or `message` or `description`
+- Input path rule:
+  - use `--input <path>` only when a producer already emitted a real JSON file
+  - otherwise prefer `--input -` and pipe findings through `stdin`
+  - do not create ad-hoc temporary findings files in the project workspace just to drive the workflow
 - Supported dispatch paths live in:
   - `references/mode-producer-matrix.md`
 
