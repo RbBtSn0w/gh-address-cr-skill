@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import argparse
-from pathlib import Path
 
 from python_common import handled_threads_file, session_engine, state_dir
 

@@ -2,7 +2,6 @@
 from __future__ import annotations
 import argparse
 import json
-from pathlib import Path
 
 from python_common import audit_event, list_threads, normalize_repo, session_engine, session_file, snapshot_file, state_dir
 
