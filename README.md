@@ -244,6 +244,8 @@ The main logic now lives in Python under `gh-address-cr/scripts/`:
 - `batch_resolve.py`
 - `clean_state.py`
 
+These Python entrypoints require Python 3.10+ because the implementation uses modern typing syntax such as `list[str]` and `str | None`.
+
 The matching `.sh` files are kept for backward compatibility with existing skill prompts and operator habits.
 
 Unified CLI examples:

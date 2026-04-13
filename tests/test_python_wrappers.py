@@ -728,6 +728,55 @@ else:
         self.assertIn("== PR Review Threads ==", result.stdout)
         self.assertIn("github-thread:THREAD_A", result.stdout)
 
+    def test_run_once_python_lists_reopened_thread_as_unhandled(self):
+        gh = self.bin_dir / "gh"
+        phase_file = Path(self.temp_dir.name) / "thread_phase.txt"
+        phase_file.write_text("resolved", encoding="utf-8")
+        gh.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import pathlib
+import sys
+
+phase = pathlib.Path({str(phase_file)!r}).read_text(encoding='utf-8').strip()
+node = {{
+    'id': 'THREAD_REOPENED',
+    'isResolved': phase == 'resolved',
+    'isOutdated': False,
+    'path': 'src/reopened.py',
+    'line': 4,
+    'firstComment': {{'nodes': [{{'url': 'https://example.test/thread/reopened', 'body': 'Please revisit this.'}}]}},
+    'latestComment': {{'nodes': [{{'url': 'https://example.test/thread/reopened', 'body': 'Please revisit this.'}}]}},
+}}
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({{
+        'data': {{
+            'repository': {{
+                'pullRequest': {{
+                    'reviewThreads': {{
+                        'pageInfo': {{'hasNextPage': False, 'endCursor': None}},
+                        'nodes': [node],
+                    }}
+                }}
+            }}
+        }}
+    }}))
+else:
+    raise SystemExit(f'unhandled gh args: {{sys.argv[1:]}}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        first = self.run_cmd([sys.executable, str(RUN_ONCE_PY), self.repo, self.pr])
+        self.assertEqual(first.returncode, 0, first.stderr)
+
+        phase_file.write_text("reopened", encoding="utf-8")
+        second = self.run_cmd([sys.executable, str(RUN_ONCE_PY), self.repo, self.pr])
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("github-thread:THREAD_REOPENED", second.stdout)
+
     def test_final_gate_python_passes_on_resolved_threads(self):
         gh = self.bin_dir / "gh"
         gh.write_text(

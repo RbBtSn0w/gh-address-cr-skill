@@ -77,6 +77,44 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertTrue(item["handled"])
         self.assertIsNotNone(item["handled_at"])
 
+    def test_sync_github_reopened_thread_becomes_unhandled_again(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        resolved = json.dumps(
+            [
+                {
+                    "id": "THREAD_REOPENED",
+                    "isResolved": True,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Please add a null check.",
+                    "url": "https://example.test/thread/reopened",
+                }
+            ]
+        )
+        reopened = json.dumps(
+            [
+                {
+                    "id": "THREAD_REOPENED",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Please add a null check.",
+                    "url": "https://example.test/thread/reopened",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=resolved, check=True)
+        self.run_engine("sync-github", self.repo, self.pr, stdin=reopened, check=True)
+
+        session = self.load_session()
+        item = session["items"]["github-thread:THREAD_REOPENED"]
+        self.assertEqual(item["status"], "OPEN")
+        self.assertFalse(item["handled"])
+        self.assertIsNone(item["handled_at"])
+        self.assertEqual(item["reopen_count"], 1)
+
     def test_gate_treats_stale_github_thread_as_non_unresolved(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         payload = json.dumps(
@@ -621,6 +659,60 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(local_item["status"], "CLOSED")
         self.assertTrue(local_item["handled"])
         self.assertEqual(local_item["linked_github_item_id"], "github-thread:THREAD_7")
+
+    def test_sync_github_closes_published_local_finding_when_reply_changes_latest_comment(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        local_payload = json.dumps(
+            [
+                {
+                    "title": "Published upstream",
+                    "body": "This was posted to GitHub.",
+                    "path": "src/map.py",
+                    "line": 11,
+                    "severity": "P2",
+                    "category": "correctness",
+                }
+            ]
+        )
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        session = self.load_session()
+        local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+        self.run_engine(
+            "mark-published",
+            self.repo,
+            self.pr,
+            local_id,
+            "--published-ref",
+            "456",
+            "--url",
+            "https://example.test/comment/456",
+            "--note",
+            "Published upstream.",
+            check=True,
+        )
+
+        gh_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_8",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/map.py",
+                    "line": 11,
+                    "body": "Follow-up reply changed the latest comment body.",
+                    "url": "https://example.test/comment/789",
+                    "first_url": "https://example.test/comment/456",
+                    "latest_url": "https://example.test/comment/789",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=gh_payload, check=True)
+
+        session = self.load_session()
+        local_item = session["items"][local_id]
+        self.assertEqual(local_item["status"], "CLOSED")
+        self.assertTrue(local_item["handled"])
+        self.assertEqual(local_item["linked_github_item_id"], "github-thread:THREAD_8")
 
     def test_gate_fails_when_loop_threshold_is_exceeded(self):
         self.run_engine("init", self.repo, self.pr, check=True)

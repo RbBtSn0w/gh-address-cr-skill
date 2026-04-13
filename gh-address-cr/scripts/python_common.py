@@ -134,6 +134,8 @@ def list_threads(repo: str, pr_number: str) -> list[dict]:
                     "comment_source": "latest" if latest else ("first" if first else "none"),
                     "first_url": first_node.get("url"),
                     "latest_url": latest_node.get("url"),
+                    "first_body": first_node.get("body"),
+                    "latest_body": latest_node.get("body"),
                 }
             )
         if not review_threads["pageInfo"]["hasNextPage"]:

@@ -214,6 +214,7 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
     resolved = bool(row.get("isResolved"))
     status = "CLOSED" if resolved else "OPEN"
     existing = session["items"].get(item_id)
+    reopened = bool(existing) and existing.get("status") in GITHUB_TERMINAL_STATUSES and not resolved
     payload = {
         "item_id": item_id,
         "item_kind": "github_thread",
@@ -231,12 +232,16 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         "status": status,
         "decision": None,
         "blocking": blocking_for_status(status),
-        "handled": (existing.get("handled") if existing else False) or resolved,
-        "handled_at": existing.get("handled_at") if existing and existing.get("handled_at") else (now if resolved else None),
+        "handled": False if reopened else ((existing.get("handled") if existing else False) or resolved),
+        "handled_at": None if reopened else (
+            existing.get("handled_at") if existing and existing.get("handled_at") else (now if resolved else None)
+        ),
         "resolution_note": existing.get("resolution_note") if existing else None,
         "published": True,
         "published_ref": row.get("url"),
         "url": row.get("url"),
+        "first_url": row.get("first_url"),
+        "latest_url": row.get("latest_url"),
         "is_outdated": bool(row.get("isOutdated")),
         "scan_id": session.get("current_scan_id"),
         "introduced_in_sha": row.get("introduced_in_sha"),
@@ -256,6 +261,9 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         payload["history"].append(history_event("created", "Imported from GitHub"))
     else:
         payload["history"].append(history_event("synced", "Refreshed from GitHub"))
+        if reopened:
+            payload["reopen_count"] = payload.get("reopen_count", 0) + 1
+            payload["history"].append(history_event("reopened", "Thread reopened on GitHub"))
     session["items"][item_id] = payload
     return item_id, created
 
@@ -330,7 +338,8 @@ def reconcile_published_findings(session: dict):
         if item["item_kind"] != "local_finding" or item["status"] != "PUBLISHED":
             continue
         for github_item in github_items:
-            same_url = item.get("url") and item.get("url") == github_item.get("url")
+            github_urls = {value for value in (github_item.get("url"), github_item.get("first_url"), github_item.get("latest_url")) if value}
+            same_url = bool(item.get("url")) and item.get("url") in github_urls
             same_location = item.get("path") == github_item.get("path") and item.get("line") == github_item.get("line")
             same_body = normalize_text(item.get("body", "")) == normalize_text(github_item.get("body", ""))
             if same_url or (same_location and same_body):
