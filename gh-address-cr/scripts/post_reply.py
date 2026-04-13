@@ -15,15 +15,20 @@ def current_login() -> str:
 
 
 def list_pending_review_ids(repo: str, pr_number: str, login: str) -> set[int]:
-    response = run_cmd(["gh", "api", f"repos/{repo}/pulls/{pr_number}/reviews"], check=True)
-    reviews = json.loads(response.stdout)
+    page = 1
     pending: set[int] = set()
-    for review in reviews:
-        if review.get("state") != "PENDING":
-            continue
-        if (review.get("user") or {}).get("login") != login:
-            continue
-        pending.add(review["id"])
+    while True:
+        response = run_cmd(["gh", "api", f"repos/{repo}/pulls/{pr_number}/reviews?per_page=100&page={page}"], check=True)
+        reviews = json.loads(response.stdout)
+        if not reviews:
+            break
+        for review in reviews:
+            if review.get("state") != "PENDING":
+                continue
+            if (review.get("user") or {}).get("login") != login:
+                continue
+            pending.add(review["id"])
+        page += 1
     return pending
 
 
