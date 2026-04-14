@@ -365,6 +365,56 @@ print(json.dumps({
         self.assertTrue(item["needs_human"])
         self.assertEqual(session["loop_state"]["status"], "NEEDS_HUMAN")
 
+    def test_cr_loop_sync_requires_explicit_source(self):
+        findings_file = Path(self.temp_dir.name) / "findings.json"
+        findings_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Scoped finding",
+                        "body": "This should be namespaced to one producer.",
+                        "path": "src/scoped.py",
+                        "line": 2,
+                        "severity": "P2",
+                        "category": "correctness",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        fixer = Path(self.temp_dir.name) / "fixer.py"
+        fixer.write_text(
+            """#!/usr/bin/env python3
+import json, sys
+payload = json.loads(sys.stdin.read())
+print(json.dumps({
+    "resolution": "fix",
+    "note": "No-op.",
+    "validation_commands": []
+}))
+""",
+            encoding="utf-8",
+        )
+        fixer.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CR_LOOP_PY),
+                "local",
+                "json",
+                "--input",
+                str(findings_file),
+                "--sync",
+                "--fixer-cmd",
+                f"{sys.executable} {fixer}",
+                self.repo,
+                self.pr,
+            ]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires an explicit --source", result.stderr)
+
     def test_cr_loop_local_code_review_uses_adapter_backed_intake(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
         findings_file.write_text(
@@ -413,6 +463,59 @@ print(json.dumps({
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Created 1 local item", result.stdout)
+        self.assertIn("cr-loop PASSED", result.stdout)
+
+    def test_cr_loop_validation_commands_are_not_executed_through_shell(self):
+        findings_file = Path(self.temp_dir.name) / "findings.json"
+        findings_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Shell validation",
+                        "body": "Validation should be argv-based.",
+                        "path": "src/validation.py",
+                        "line": 5,
+                        "severity": "P2",
+                        "category": "correctness",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        bad_file = Path(self.temp_dir.name) / "validation-bad.txt"
+        fixer = Path(self.temp_dir.name) / "fixer.py"
+        fixer.write_text(
+            f"""#!/usr/bin/env python3
+import json, sys
+payload = json.loads(sys.stdin.read())
+print(json.dumps({{
+    "resolution": "fix",
+    "note": "Try argv validation.",
+    "validation_commands": ["python3 -c \\"import sys; sys.exit(0)\\" && python3 -c \\"from pathlib import Path; Path({str(bad_file)!r}).write_text('bad')\\""]
+}}))
+""",
+            encoding="utf-8",
+        )
+        fixer.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CR_LOOP_PY),
+                "local",
+                "json",
+                "--input",
+                str(findings_file),
+                "--source",
+                "local-agent:test",
+                "--fixer-cmd",
+                f"{sys.executable} {fixer}",
+                self.repo,
+                self.pr,
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(bad_file.exists())
         self.assertIn("cr-loop PASSED", result.stdout)
 
     def test_cr_loop_does_not_mark_github_thread_needs_human_from_loop_warning_threshold(self):

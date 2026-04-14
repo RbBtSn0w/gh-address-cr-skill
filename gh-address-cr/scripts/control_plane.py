@@ -24,7 +24,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("parts", nargs="*", help="Mode-dependent positional args.")
     parser.add_argument("--audit-id", default="")
     parser.add_argument("--scan-id", default="")
-    parser.add_argument("--source", default="")
+    parser.add_argument("--source", default=None)
     parser.add_argument("--sync", action="store_true", help="Close missing local findings from the same source.")
     parser.add_argument(
         "--input",
@@ -81,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
         return die("remote mode does not accept a producer.")
     if args.mode == "ingest" and producer != "json":
         return die("ingest mode only supports producer=json.")
+
+    if args.sync and not args.source:
+        return die("`--sync` requires an explicit --source so missing findings stay scoped to one producer.")
 
     source = args.source or (f"local-agent:{producer}" if producer else "")
     stdin_payload = None

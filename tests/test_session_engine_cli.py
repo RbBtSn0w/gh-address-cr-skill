@@ -374,6 +374,46 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(item["status"], "VERIFIED")
         self.assertFalse(item["blocking"])
 
+    def test_update_item_reopen_clears_claim_and_reenables_selection(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        local_payload = json.dumps(
+            [
+                {
+                    "title": "Reopen me",
+                    "body": "This finding should come back after reopening.",
+                    "path": "src/reopen.py",
+                    "line": 11,
+                    "severity": "P2",
+                    "category": "correctness",
+                }
+            ]
+        )
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=local_payload, check=True)
+        session = self.load_session()
+        local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+        self.run_engine("claim", self.repo, self.pr, local_id, "--agent", "fixer-1", check=True)
+        self.run_engine("update-item", self.repo, self.pr, local_id, "CLOSED", "--note", "Temporarily closed.", check=True)
+
+        reopen = self.run_engine(
+            "update-item",
+            self.repo,
+            self.pr,
+            local_id,
+            "OPEN",
+            "--note",
+            "Reopened after resurfacing.",
+        )
+        self.assertEqual(reopen.returncode, 0, reopen.stderr)
+
+        session = self.load_session()
+        item = session["items"][local_id]
+        self.assertEqual(item["status"], "OPEN")
+        self.assertTrue(item["blocking"])
+        self.assertFalse(item["handled"])
+        self.assertIsNone(item["claimed_by"])
+        self.assertIsNone(item["lease_expires_at"])
+        self.assertFalse(item["needs_human"])
+
     def test_gate_fails_until_all_blocking_items_are_cleared(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         gh_payload = json.dumps(

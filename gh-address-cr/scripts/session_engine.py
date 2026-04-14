@@ -550,6 +550,8 @@ def cmd_update_item(args):
         item["reopen_count"] = item.get("reopen_count", 0) + 1
     if item.get("needs_human"):
         item["needs_human"] = False
+    if args.status == "OPEN":
+        clear_claim(item)
     if item["item_kind"] == "local_finding" and args.status in {"CLARIFIED", "DEFERRED", "VERIFIED", "CLOSED"}:
         item["handled"] = True
         item["handled_at"] = utc_now()
@@ -567,7 +569,7 @@ def cmd_update_item(args):
     if args.note:
         item["resolution_note"] = args.note
         item["history"].append(history_event("status-updated", args.note, actor=args.actor))
-    if args.status in NON_BLOCKING_STATUSES:
+    if args.status in NON_BLOCKING_STATUSES and args.status != "OPEN":
         clear_claim(item)
     save_session(session)
     append_audit_event(

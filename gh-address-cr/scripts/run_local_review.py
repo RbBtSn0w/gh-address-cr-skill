@@ -15,7 +15,7 @@ def main() -> int:
         description="Run a local review adapter and ingest findings into the PR session."
     )
     parser.add_argument("--scan-id", default="")
-    parser.add_argument("--source", default="local-agent:custom")
+    parser.add_argument("--source", default=None)
     parser.add_argument("--sync", action="store_true", help="Close missing local findings from the same source.")
     parser.add_argument("repo")
     parser.add_argument("pr_number")
@@ -24,6 +24,9 @@ def main() -> int:
 
     if not args.adapter_cmd:
         parser.error("missing adapter command")
+    if args.sync and not args.source:
+        print("`--sync` requires an explicit --source so missing findings stay scoped to one producer.", file=sys.stderr)
+        return 2
 
     scan_id = args.scan_id or ""
     if not SESSION_ENGINE.exists():
@@ -48,7 +51,7 @@ def main() -> int:
         args.repo,
         args.pr_number,
         "--source",
-        args.source,
+        args.source or "local-agent:custom",
     ]
     if scan_id:
         ingest_cmd.extend(["--scan-id", scan_id])

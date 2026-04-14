@@ -82,7 +82,7 @@ def main() -> int:
         description="Ingest findings JSON from stdin or a file into the PR session."
     )
     parser.add_argument("--scan-id", default="")
-    parser.add_argument("--source", default="local-agent:imported")
+    parser.add_argument("--source", default=None)
     parser.add_argument("--sync", action="store_true", help="Close missing local findings from the same source.")
     parser.add_argument(
         "--input",
@@ -96,6 +96,9 @@ def main() -> int:
     if not SESSION_ENGINE.exists():
         print(f"Missing session engine: {SESSION_ENGINE}", file=sys.stderr)
         return 1
+    if args.sync and not args.source:
+        print("`--sync` requires an explicit --source so missing findings stay scoped to one producer.", file=sys.stderr)
+        return 2
 
     findings = [normalize_finding(record) for record in parse_records(load_payload(args.input))]
 
@@ -112,7 +115,7 @@ def main() -> int:
         args.repo,
         args.pr_number,
         "--source",
-        args.source,
+        args.source or "local-agent:imported",
     ]
     if args.scan_id:
         ingest_cmd.extend(["--scan-id", args.scan_id])

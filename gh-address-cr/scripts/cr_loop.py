@@ -310,7 +310,13 @@ def write_internal_fixer_request(repo: str, pr_number: str, *, run_id: str, iter
 
 def run_validation(commands: list[str]) -> tuple[bool, str]:
     for command in commands:
-        result = subprocess.run(command, shell=True, text=True, capture_output=True)
+        try:
+            argv = shlex.split(command)
+        except ValueError as exc:
+            return False, f"Invalid validation command: {command}\n{exc}"
+        if not argv:
+            return False, "Invalid validation command: command is empty."
+        result = subprocess.run(argv, text=True, capture_output=True)
         if result.returncode != 0:
             output = (result.stdout or "") + (result.stderr or "")
             return False, f"Validation failed: {command}\n{output}".strip()
@@ -516,6 +522,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.mode == "ingest" and producer != "json":
         print("ingest mode only supports producer=json.", file=sys.stderr)
+        return 2
+    if args.sync and not args.source:
+        print("`--sync` requires an explicit --source so missing findings are scoped to one producer.", file=sys.stderr)
         return 2
 
     stdin_payload = None

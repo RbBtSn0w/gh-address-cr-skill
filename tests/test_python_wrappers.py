@@ -349,6 +349,54 @@ else:
         self.assertEqual(summary["item_kind"], None)
         self.assertEqual(summary["next_action"], "No action required.")
 
+    def test_run_local_review_requires_explicit_source_for_sync(self):
+        adapter = Path(self.temp_dir.name) / "adapter.py"
+        adapter.write_text("import json\nprint(json.dumps([]))\n", encoding="utf-8")
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(RUN_LOCAL_REVIEW_PY),
+                "--sync",
+                self.repo,
+                self.pr,
+                sys.executable,
+                str(adapter),
+            ]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires an explicit --source", result.stderr)
+
+    def test_ingest_findings_requires_explicit_source_for_sync(self):
+        payload_file = Path(self.temp_dir.name) / "findings.json"
+        payload_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Needs source",
+                        "body": "Sync should not default to a shared namespace.",
+                        "path": "src/source.py",
+                        "line": 4,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(INGEST_FINDINGS_PY),
+                "--sync",
+                "--input",
+                str(payload_file),
+                self.repo,
+                self.pr,
+            ]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires an explicit --source", result.stderr)
+
     def test_cli_dispatches_run_once(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
@@ -798,6 +846,13 @@ else:
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ingest mode only supports producer=json", result.stderr)
+
+    def test_control_plane_requires_explicit_source_for_sync(self):
+        result = self.run_cmd(
+            [sys.executable, str(CONTROL_PLANE_PY), "local", "json", "--sync", self.repo, self.pr]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires an explicit --source", result.stderr)
 
     def test_prepare_code_review_emits_bridge_prompt(self):
         result = self.run_cmd(
