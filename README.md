@@ -71,6 +71,31 @@ $gh-address-cr findings <PR_URL> --input findings.json --sync
 $gh-address-cr review <PR_URL>
 ```
 
+Prompt patterns:
+
+When `gh-address-cr` is the main entrypoint:
+
+```text
+使用 $gh-address-cr 处理这个 PR：<PR_URL>
+
+先让上游 review producer 输出 findings JSON，不要只给 Markdown。
+如果上游只会输出 Markdown review blocks，先用 `review-to-findings` 转成 findings JSON。
+如果 findings 是当前步骤现产出的，优先通过 stdin 传入；只有在已经存在真实 JSON 文件时才使用 --input <path>。
+然后由 $gh-address-cr 接管 session、GitHub threads 和 final-gate，直到通过。
+如果你要刷新本地 findings 并自动关闭消失的旧项，再加 `--sync`。
+```
+
+When the upstream review command must run first and `gh-address-cr` can only come second:
+
+```text
+先运行 <review-command> 审查这个 PR：<PR_URL>，并输出 findings JSON，不要只给 Markdown。
+如果该命令只输出 Markdown review blocks，先用 `review-to-findings` 转成 findings JSON。
+然后把这些 findings 交给 $gh-address-cr，使用 `findings` 入口接管 JSON 文件，或使用 `review` 入口接管当前步骤的 stdin。
+如果 findings 已经是现成文件，用 --input <path>；如果是当前步骤现产出的，优先用 --input - 通过 stdin 传入。
+如果你想刷新同一来源的 findings 并自动关闭消失项，再加 `--sync`。
+最后由 $gh-address-cr 负责 intake、session、reply/resolve 和 final-gate。
+```
+
 Advanced producer categories:
 
 - `code-review`

@@ -207,14 +207,18 @@ When `gh-address-cr` is the main entrypoint, prefer:
 $gh-address-cr review <PR_URL>
 
 Use the upstream review producer to emit findings JSON first, then let $gh-address-cr ingest, process, and gate the PR session.
+If the upstream tool emits Markdown review blocks, convert them first with `review-to-findings`, then feed the resulting JSON to `gh-address-cr`.
+If the findings are produced in the current step, prefer `--input -` and stdin.
 ```
 
 When an external review command must run first and `gh-address-cr` can only come second, prefer:
 
 ```text
 First run <review-command> on <PR_URL> and emit findings JSON, not Markdown only.
-Then hand the findings to $gh-address-cr using review.
+If the command only emits Markdown review blocks, convert them first with `review-to-findings`.
+Then hand the findings to $gh-address-cr using `findings` or `review`, depending on whether the input is already a JSON file.
 Use --input <path> only for an already-existing JSON file; otherwise prefer --input - with stdin.
+Add `--sync` when you want missing findings from the same source to auto-close on refresh.
 ```
 
 ## Discovery Rules
