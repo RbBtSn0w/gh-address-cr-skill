@@ -25,7 +25,7 @@ Use this skill as the PR review control plane. It owns session state, intake rou
 - `ingest`: import existing findings JSON
 
 `producer`
-- `code-review`: findings must be produced as structured JSON first
+- `code-review`: any review-style producer that emits structured findings JSON first
 - `json`: findings already exist as JSON
 - `adapter`: an adapter command prints findings JSON
 
@@ -64,7 +64,14 @@ For `producer=code-review`, the execution model is:
 - if findings are being produced in the current step, prefer piping them through `stdin` with `--input -`
 - let `control-plane` pass that JSON through the built-in `code-review-adapter`
 
-Do not assume `gh-address-cr` directly runs another review skill by itself. The review step is still external; the intake path is now adapter-backed and stable.
+`producer=code-review` is a contract label, not a hardcoded dependency on one specific skill name.
+
+- It can be `/code-review`
+- It can be `/code-review-aa`
+- It can be `/code-review-bb`
+- It can be an agent-native review command that only runs before `gh-address-cr`
+
+The only requirement is that the upstream review step emits findings in the accepted JSON shapes. Do not assume `gh-address-cr` directly runs another review skill by itself. The review step is still external; the intake path is now adapter-backed and stable.
 
 ## Non-Negotiable Rule
 
@@ -113,6 +120,7 @@ Use `cr-loop` when you want `gh-address-cr` to run multiple iterations automatic
 `gh-address-cr` is the control plane. Producers are replaceable.
 
 - `code-review` is a producer, not the session owner.
+- `code-review` here means "review-style findings producer", not one mandatory skill name.
 - `code-review` now uses the built-in `code-review-adapter` backend for structured intake.
 - `gh-address-cr` only assumes the normalized finding contract:
   - `title`
@@ -134,6 +142,24 @@ Use `cr-loop` when you want `gh-address-cr` to run multiple iterations automatic
   - do not create ad-hoc temporary findings files in the project workspace just to drive the workflow
 - Supported dispatch paths live in:
   - `references/mode-producer-matrix.md`
+
+## Prompt Patterns
+
+When `gh-address-cr` is the main entrypoint, prefer:
+
+```text
+$gh-address-cr loop mixed code-review <PR_URL>
+
+Use the upstream review producer to emit findings JSON first, then let $gh-address-cr ingest, process, and gate the PR session.
+```
+
+When an external review command must run first and `gh-address-cr` can only come second, prefer:
+
+```text
+First run <review-command> on <PR_URL> and emit findings JSON, not Markdown only.
+Then hand the findings to $gh-address-cr using loop mixed code-review.
+Use --input <path> only for an already-existing JSON file; otherwise prefer --input - with stdin.
+```
 
 ## Discovery Rules
 
