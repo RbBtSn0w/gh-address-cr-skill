@@ -55,6 +55,7 @@ This keeps `gh-address-cr` as the session/gate/orchestration layer while letting
 The exact dispatch behavior for each supported `mode + producer` combination is documented in:
 
 - `gh-address-cr/references/mode-producer-matrix.md`
+- `gh-address-cr/references/newcomer-playbook.md`
 
 The preferred automation entrypoint is now:
 
