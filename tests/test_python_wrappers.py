@@ -7,6 +7,7 @@ from tests.helpers import (
     CONTROL_PLANE_PY,
     CODE_REVIEW_ADAPTER_PY,
     FINAL_GATE_PY,
+    GH_ADDRESS_CR_SH,
     INGEST_FINDINGS_PY,
     LIST_THREADS_PY,
     POST_REPLY_PY,
@@ -35,6 +36,11 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertNotIn("control-plane", result.stdout)
         self.assertNotIn("run-once", result.stdout)
         self.assertNotIn("session-engine", result.stdout)
+
+    def test_shell_wrapper_dispatches_review_help(self):
+        result = self.run_cmd([str(GH_ADDRESS_CR_SH), "review", "--help"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("High-level PR review entrypoint.", result.stdout)
 
     def test_cli_review_help_uses_high_level_alias_text(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "review", "--help"])

@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ROOT / "gh-address-cr" / "scripts"
 CLI_PY = SCRIPTS_DIR / "cli.py"
+GH_ADDRESS_CR_SH = SCRIPTS_DIR / "gh-address-cr.sh"
 SCRIPT = SCRIPTS_DIR / "session_engine.py"
 RUN_LOCAL_REVIEW_PY = SCRIPTS_DIR / "run_local_review.py"
 INGEST_FINDINGS_PY = SCRIPTS_DIR / "ingest_findings.py"

@@ -106,10 +106,10 @@ The only requirement is that the upstream review step emits findings in the acce
 
 ## Non-Negotiable Rule
 
-`final_gate.sh` pass is mandatory before any completion statement.
+`python3 gh-address-cr/scripts/cli.py final-gate` pass is mandatory before any completion statement.
 
 - Never output "done", "all resolved", "completed", or equivalent unless:
-  - `scripts/final_gate.sh <owner/repo> <pr_number>` has just passed, and
+  - `python3 gh-address-cr/scripts/cli.py final-gate <owner/repo> <pr_number>` has just passed, and
   - output includes `Verified: 0 Unresolved Threads found`, and
   - session blocking item count is zero.
 - If gate fails, continue iteration; completion summary is forbidden.
@@ -126,7 +126,7 @@ The only requirement is that the upstream review step emits findings in the acce
 4. For GitHub review threads, reply and resolve are both mandatory.
 5. For local findings, terminal handling must include a note.
 6. `producer=code-review` must emit findings JSON before session handling starts.
-7. Never declare completion before `final_gate.sh` passes.
+7. Never declare completion before `python3 gh-address-cr/scripts/cli.py final-gate` passes.
 
 ## Automatic Iteration
 
@@ -307,7 +307,7 @@ Final output must include:
 
 - dispatch matrix: `references/mode-producer-matrix.md`
 - checklist: `references/cr-triage-checklist.md`
-- stable operator surface: `scripts/*.sh`
+- stable operator surface: `scripts/gh-address-cr.sh`
 - preferred automation surface: `python3 scripts/cli.py ...`
 - code-review bridge prompt: `python3 scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>`
 - Markdown-to-findings converter: `python3 scripts/cli.py review-to-findings <owner/repo> <pr_number> --input -`

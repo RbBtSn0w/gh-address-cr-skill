@@ -225,7 +225,7 @@ from GitHub thread state; the main downside is potential repeated work.
                    |
                    v
 +-------------------------------------+      (Fetch PR threads, exclude handled)
-|          1. run_once.sh             | <-----------------------------------------+
+|          1. python3 gh-address-cr/scripts/cli.py run-once             | <-----------------------------------------+
 +------------------+------------------+                                           |
                    |                                                              |
                    v [Generates Snapshot, Syncs Session, Lists Work]              |
@@ -248,7 +248,7 @@ from GitHub thread state; the main downside is potential repeated work.
          v                   v                       v                            |
 +--------+--------+ +--------+--------+     +--------+--------+                   |
 | 4a. generate_   | | 4b. generate_   |     | 4c. generate_   |                   |
-|    reply.sh     | |    reply.sh     |     |    reply.sh     |                   |
+|    reply     | |    reply     |     |    reply     |                   |
 |    --mode fix   | |  --mode clarify |     |   --mode defer  |                   |
 +--------+--------+ +--------+--------+     +--------+--------+                   |
          |                   |                       |                            |
@@ -257,15 +257,15 @@ from GitHub thread state; the main downside is potential repeated work.
                    v [Generates reply markdown in the PR workspace]               |
                    |                                                              |
 +------------------+------------------+      (GitHub API: Reply)                  |
-|         5. post_reply.sh            |                                           |
+|         5. python3 gh-address-cr/scripts/cli.py post-reply            |                                           |
 +------------------+------------------+                                           |
                    |                                                              |
 +------------------+------------------+      (MANDATORY for all paths)            |
-|       6. resolve_thread.sh          |      (Local state marked 'Handled')       |
+|       6. python3 gh-address-cr/scripts/cli.py resolve-thread          |      (Local state marked 'Handled')       |
 +------------------+------------------+                                           |
                    |                                                              |
 +------------------+------------------+      (HARD GATE: Re-fetch GitHub state)   |
-|         7. final_gate.sh            |-------------------------------------------+
+|         7. python3 gh-address-cr/scripts/cli.py final-gate            |-------------------------------------------+
 +------------------+------------------+      [ Failed: Unresolved > 0 (Loop back) ]
                    |
                    | [ Passed: Unresolved == 0 ]
@@ -285,14 +285,14 @@ from GitHub thread state; the main downside is potential repeated work.
 The implementation model is now:
 
 - Python owns the stateful logic and GitHub/local-review orchestration.
-- `.sh` files are retained as compatibility entrypoints and mostly forward to Python.
+- `scripts/gh-address-cr.sh` is the only shell compatibility entrypoint; internal commands use the Python CLI directly.
 - `gh-address-cr/scripts/cli.py` is the unified Python dispatcher for the main command set.
 - Tests are organized around Python behavior first, then shell wrapper syntax compatibility.
 
 - `github_thread` items are synced from GraphQL thread snapshots.
 - `local_finding` items are ingested from a local review adapter.
 - local findings can now be explicitly closed in-session with `session_engine.py close-item`.
-- `final_gate.sh` evaluates both:
+- `python3 gh-address-cr/scripts/cli.py final-gate` evaluates both:
   - session blocking item count
   - unresolved GitHub thread count
 
@@ -317,10 +317,10 @@ The session also tracks loop-safety metadata per item:
 
 ## Local AI Review Ingestion
 
-Use `scripts/run_local_review.sh` to feed local AI findings into the PR session:
+Use `python3 gh-address-cr/scripts/cli.py run-local-review` to feed local AI findings into the PR session:
 
 ```bash
-scripts/run_local_review.sh --source local-agent:codex owner/repo 123 ./adapter.sh --base main --head HEAD
+python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh --base main --head HEAD
 ```
 
 Adapter contract:
@@ -354,10 +354,10 @@ Input rule:
 
 Use that cache-backed findings path instead of creating review artifacts in the project workspace.
 
-If your review tool already produces findings JSON, you do not need a custom adapter command. Use `scripts/ingest_findings.sh` instead:
+If your review tool already produces findings JSON, you do not need a custom adapter command. Use `python3 gh-address-cr/scripts/cli.py ingest-findings` instead:
 
 ```bash
-cat findings.json | scripts/ingest_findings.sh --source local-agent:code-review owner/repo 123
+cat findings.json | python3 gh-address-cr/scripts/cli.py ingest-findings --source local-agent:code-review owner/repo 123
 ```
 
 Accepted input shapes:
@@ -391,7 +391,7 @@ This is the long-term integration path for any local code-review tool. If it can
 To publish a local finding back to GitHub as a review comment:
 
 ```bash
-scripts/publish_finding.sh --repo owner/repo --pr 123 local-finding:<fingerprint>
+python3 gh-address-cr/scripts/cli.py publish-finding --repo owner/repo --pr 123 local-finding:<fingerprint>
 ```
 
 To reclaim expired item claims inside a PR session:
@@ -432,7 +432,7 @@ The main logic now lives in Python under `gh-address-cr/scripts/`:
 
 These Python entrypoints require Python 3.10+ because the implementation uses modern typing syntax such as `list[str]` and `str | None`.
 
-The matching `.sh` files are kept for backward compatibility with existing skill prompts and operator habits.
+The single shell wrapper `scripts/gh-address-cr.sh` is kept for compatibility; all internal commands use the Python CLI directly.
 
 Unified CLI examples:
 
@@ -452,7 +452,7 @@ Run the current automated checks with:
 
 ```bash
 python3 -m unittest discover -s tests
-bash -n gh-address-cr/scripts/*.sh
+bash -n gh-address-cr/scripts/gh-address-cr.sh
 ```
 
 Current test layout:
@@ -474,11 +474,11 @@ npx skills add https://github.com/RbBtSn0w/gh-address-cr-skill --skill gh-addres
 
 ## Breaking changes (2026-04-09)
 
-- `scripts/batch_resolve.sh` now requires an approved list format:
+- `python3 gh-address-cr/scripts/cli.py batch-resolve` now requires an approved list format:
   - one thread per line: `APPROVED <thread_id>`
   - empty lines and `#` comments are allowed
   - raw thread-id lines now fail fast
-- `scripts/list_threads.sh` now uses the latest thread comment as primary context and emits:
+- `python3 gh-address-cr/scripts/cli.py list-threads` now uses the latest thread comment as primary context and emits:
   - `comment_source` (`latest|first|none`)
   - `first_url`, `latest_url`
   - `url`/`body` remain available, now latest-first with fallback
@@ -516,7 +516,7 @@ npx skills update
 - PR-scoped session state for GitHub threads and local findings
 - Strict per-item CR handling workflow
 - Required evidence format (commit/files/test result)
-- Mandatory final gate (`final_gate.sh`) before completion
+- Mandatory final gate (`python3 gh-address-cr/scripts/cli.py final-gate`) before completion
 - Session-scoped state tracking to avoid duplicate work
 - Audit log + audit summary + summary hash output
 - Python-first implementation with shell compatibility wrappers
@@ -528,18 +528,18 @@ npx skills update
   - `SKILL.md`
   - `agents/openai.yaml`
   - `scripts/*.py`
-  - `scripts/*.sh` (compat wrappers)
+  - `scripts/gh-address-cr.sh` (compat wrapper)
   - `assets/reply-templates/*`
   - `references/cr-triage-checklist.md`
 
 ## Quick usage after installation
 
 ```bash
-scripts/run_once.sh --audit-id run-YYYYMMDD owner/repo 123
-scripts/run_local_review.sh --source local-agent:codex owner/repo 123 ./adapter.sh
-scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
-scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
-scripts/final_gate.sh --auto-clean --audit-id run-YYYYMMDD owner/repo 123
+python3 gh-address-cr/scripts/cli.py run-once --audit-id run-YYYYMMDD owner/repo 123
+python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
+python3 gh-address-cr/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
+python3 gh-address-cr/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
+python3 gh-address-cr/scripts/cli.py final-gate --auto-clean --audit-id run-YYYYMMDD owner/repo 123
 ```
 
 ## Operating Modes
@@ -553,20 +553,20 @@ Use this when the PR already has remote review threads and there is no local AI 
 Example:
 
 ```bash
-scripts/run_once.sh --audit-id run-20260412 owner/repo 123
+python3 gh-address-cr/scripts/cli.py run-once --audit-id run-20260412 owner/repo 123
 
 # inspect one unresolved GitHub thread
-scripts/generate_reply.sh --mode fix --severity P2 "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" abc123 "src/app.py" "python3 -m unittest" "passed" "Added the missing guard."
-scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
-scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+python3 gh-address-cr/scripts/cli.py generate-reply --mode fix --severity P2 "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" abc123 "src/app.py" "python3 -m unittest" "passed" "Added the missing guard."
+python3 gh-address-cr/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
+python3 gh-address-cr/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
 
-scripts/final_gate.sh --auto-clean --audit-id run-20260412 owner/repo 123
+python3 gh-address-cr/scripts/cli.py final-gate --auto-clean --audit-id run-20260412 owner/repo 123
 ```
 
 Rules:
 
-- GitHub thread items require both `post_reply.sh` and `resolve_thread.sh`
-- `final_gate.sh` must pass before completion
+- GitHub thread items require both `python3 gh-address-cr/scripts/cli.py post-reply` and `python3 gh-address-cr/scripts/cli.py resolve-thread`
+- `python3 gh-address-cr/scripts/cli.py final-gate` must pass before completion
 
 ### Mode 2: GitHub Thread Clarify / Defer
 
@@ -575,17 +575,17 @@ Use this when the review comment is not accepted as a code change and you need t
 Clarify example:
 
 ```bash
-scripts/generate_reply.sh --mode clarify "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "The current control flow is intentional because initialization must stay lazy."
-scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
-scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+python3 gh-address-cr/scripts/cli.py generate-reply --mode clarify "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "The current control flow is intentional because initialization must stay lazy."
+python3 gh-address-cr/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
+python3 gh-address-cr/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
 ```
 
 Defer example:
 
 ```bash
-scripts/generate_reply.sh --mode defer "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "This requires broader refactoring and is deferred to a follow-up PR."
-scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
-scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+python3 gh-address-cr/scripts/cli.py generate-reply --mode defer "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "This requires broader refactoring and is deferred to a follow-up PR."
+python3 gh-address-cr/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
+python3 gh-address-cr/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
 ```
 
 Rules:
@@ -600,7 +600,7 @@ Use this when you want to run local AI review without waiting for GitHub or Copi
 Example:
 
 ```bash
-scripts/run_local_review.sh --source local-agent:codex owner/repo 123 ./adapter.sh
+python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
 
 python3 gh-address-cr/scripts/session_engine.py list-items owner/repo 123 --item-kind local_finding --status OPEN
 python3 gh-address-cr/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT ACCEPTED --note "Confirmed locally."
@@ -608,7 +608,7 @@ python3 gh-address-cr/scripts/session_engine.py update-item owner/repo 123 local
 python3 gh-address-cr/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT VERIFIED --note "Validated with targeted tests."
 python3 gh-address-cr/scripts/session_engine.py close-item owner/repo 123 local-finding:FINGERPRINT --note "Closed after local validation."
 
-scripts/final_gate.sh --no-auto-clean --audit-id run-20260412 owner/repo 123
+python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean --audit-id run-20260412 owner/repo 123
 ```
 
 Rules:
@@ -624,13 +624,13 @@ Use this when the PR has both remote GitHub threads and local AI findings.
 Example:
 
 ```bash
-scripts/run_once.sh --audit-id run-20260412 owner/repo 123
-scripts/run_local_review.sh --source local-agent:codex owner/repo 123 ./adapter.sh
+python3 gh-address-cr/scripts/cli.py run-once --audit-id run-20260412 owner/repo 123
+python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
 
 # process GitHub items with reply + resolve
 # process local items through session_engine.py transitions
 
-scripts/final_gate.sh --no-auto-clean --audit-id run-20260412 owner/repo 123
+python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean --audit-id run-20260412 owner/repo 123
 ```
 
 Rules:
@@ -646,11 +646,11 @@ Use this when a locally discovered issue should become visible in the GitHub PR 
 Example:
 
 ```bash
-scripts/run_local_review.sh --source local-agent:codex owner/repo 123 ./adapter.sh
+python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
 python3 gh-address-cr/scripts/session_engine.py list-items owner/repo 123 --item-kind local_finding --status OPEN
 
-scripts/publish_finding.sh --repo owner/repo --pr 123 local-finding:FINGERPRINT
-scripts/run_once.sh --audit-id run-20260412 owner/repo 123
+python3 gh-address-cr/scripts/cli.py publish-finding --repo owner/repo --pr 123 local-finding:FINGERPRINT
+python3 gh-address-cr/scripts/cli.py run-once --audit-id run-20260412 owner/repo 123
 ```
 
 What happens:
@@ -675,16 +675,16 @@ python3 gh-address-cr/scripts/cli.py session-engine reclaim-stale-claims owner/r
 Rules:
 
 - `cli.py` is the preferred Python entrypoint for automation
-- `.sh` commands remain the stable compatibility surface for skill users
+- `scripts/gh-address-cr.sh` remains the stable shell compatibility surface for skill users
 
 ## Troubleshooting final gate failure
 
-If `scripts/final_gate.sh` fails:
+If `python3 gh-address-cr/scripts/cli.py final-gate` fails:
 
 1. Read the pending table in terminal output and the printed audit summary path.
-2. For each pending thread, verify both operations were completed: `scripts/post_reply.sh` and `scripts/resolve_thread.sh`.
-3. Re-run `scripts/run_once.sh --show-all ...` to compare unresolved vs handled state.
-4. Resolve remaining threads, then re-run `scripts/final_gate.sh`.
+2. For each pending thread, verify both operations were completed: `python3 gh-address-cr/scripts/cli.py post-reply` and `python3 gh-address-cr/scripts/cli.py resolve-thread`.
+3. Re-run `python3 gh-address-cr/scripts/cli.py run-once --show-all ...` to compare unresolved vs handled state.
+4. Resolve remaining threads, then re-run `python3 gh-address-cr/scripts/cli.py final-gate`.
 
 ## CI semantic release (tag + changelog)
 
