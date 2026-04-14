@@ -185,6 +185,45 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(len(local_items), 1)
         self.assertEqual(local_items[0]["status"], "OPEN")
 
+    def test_run_local_review_ignores_whitespace_only_finding_differences(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        first_payload = json.dumps(
+            [
+                {
+                    "title": "Missing nil guard",
+                    "body": "A nil dereference is possible here.",
+                    "path": "src/service.py",
+                    "line": 33,
+                    "severity": "P1",
+                    "category": "correctness",
+                }
+            ]
+        )
+        second_payload = json.dumps(
+            [
+                {
+                    "title": "Missing  nil   guard",
+                    "body": "A nil dereference is possible here.\n\n",
+                    "path": "src/service.py",
+                    "line": 33,
+                    "severity": "P1",
+                    "category": "correctness",
+                }
+            ]
+        )
+
+        first = self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=first_payload)
+        second = self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=second_payload)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("Created 1 local item", first.stdout)
+        self.assertIn("Created 0 local item", second.stdout)
+
+        session = self.load_session()
+        local_items = [item for item in session["items"].values() if item["item_kind"] == "local_finding"]
+        self.assertEqual(len(local_items), 1)
+        self.assertEqual(local_items[0]["repeat_count"], 1)
+
     def test_claim_and_update_status(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         payload = json.dumps(
@@ -889,6 +928,53 @@ class SessionEngineCLITest(SessionEngineTestCase):
         item = session["items"]["github-thread:THREAD_MANUAL_STALE"]
         self.assertEqual(item["status"], "STALE")
         self.assertFalse(item["blocking"])
+
+    def test_sync_github_reopens_deferred_thread_when_github_is_still_unresolved(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        initial_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_DEFERRED",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/map.py",
+                    "line": 18,
+                    "body": "Will be deferred locally.",
+                    "url": "https://example.test/comment/deferred",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=initial_payload, check=True)
+        self.run_engine(
+            "update-item",
+            self.repo,
+            self.pr,
+            "github-thread:THREAD_DEFERRED",
+            "DEFERRED",
+            "--note",
+            "Valid issue, but not for this PR.",
+            check=True,
+        )
+
+        refreshed_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_DEFERRED",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/map.py",
+                    "line": 18,
+                    "body": "Still open on GitHub.",
+                    "url": "https://example.test/comment/deferred",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=refreshed_payload, check=True)
+
+        session = self.load_session()
+        item = session["items"]["github-thread:THREAD_DEFERRED"]
+        self.assertEqual(item["status"], "OPEN")
+        self.assertTrue(item["blocking"])
 
     def test_gate_fails_when_loop_threshold_is_exceeded(self):
         self.run_engine("init", self.repo, self.pr, check=True)
