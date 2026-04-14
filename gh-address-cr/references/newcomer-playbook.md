@@ -28,6 +28,20 @@ Examples:
 
 If the upstream review step emits valid findings JSON, `gh-address-cr` can consume it through the `code-review` path.
 
+Use this mapping:
+
+| If your upstream source is... | Use this producer |
+| --- | --- |
+| only GitHub review threads | no producer; use `remote` |
+| an existing findings JSON file | `json` |
+| a review skill or review command that emits findings JSON | `code-review` |
+| a command whose interface is "print findings JSON" | `adapter` |
+
+Do not put the upstream tool name itself in the producer slot.
+
+- correct: `$gh-address-cr loop mixed code-review <PR_URL>`
+- incorrect: `$gh-address-cr loop mixed code-review-aa <PR_URL>`
+
 ## Pick The Right Mode
 
 - `remote`
@@ -44,6 +58,15 @@ Default for most real work:
 ```text
 $gh-address-cr loop mixed code-review <PR_URL>
 ```
+
+If you omit the producer:
+
+- `remote`
+  - fine; there is no local findings source
+- `ingest`
+  - defaults to `json`
+- `local` and `mixed`
+  - fail, because `gh-address-cr` cannot infer whether your source is `json`, `code-review`, or `adapter`
 
 ## Findings Input Rule
 

@@ -39,6 +39,32 @@ Producer naming rule:
 - It can be backed by `/code-review`, `/code-review-aa`, `/code-review-bb`, `/code-review-cc`, or any other review step that emits structured findings JSON.
 - `gh-address-cr` only cares about the findings contract, not the upstream tool name.
 
+Producer selection rule:
+
+- `remote`
+  - no producer is needed
+- `ingest`
+  - producer may be omitted; default is `json`
+- `local` or `mixed`
+  - producer must be explicit
+
+Use this mapping:
+
+| Upstream situation | Producer to use |
+| --- | --- |
+| Only GitHub review threads | none (`remote`) |
+| Existing findings JSON file | `json` |
+| A review-style skill/command emits findings JSON first | `code-review` |
+| A command directly prints findings JSON as its interface | `adapter` |
+
+Important:
+
+- `producer=code-review` is the category even if the upstream tool is named `/code-review-aa` or `/code-review-bb`.
+- Do not put the upstream tool name itself into the producer slot.
+- Example:
+  - correct: `loop mixed code-review <owner/repo> <pr>`
+  - incorrect: `loop mixed code-review-aa <owner/repo> <pr>`
+
 Meaning:
 
 - `remote`
@@ -126,6 +152,12 @@ When the upstream review tool must run first and `gh-address-cr` can only come s
 如果 findings 已经是现成文件，用 --input <path>；如果是当前步骤现产出的，优先用 --input - 通过 stdin 传入。
 最后由 $gh-address-cr 负责 intake、session、reply/resolve 和 final-gate。
 ```
+
+If you omit the producer where it is required:
+
+- `local` and `mixed` will fail because the dispatcher cannot infer whether you mean `json`, `code-review`, or `adapter`
+- `ingest` will assume `json`
+- `remote` does not accept a producer at all
 
 ## CR Loop
 
