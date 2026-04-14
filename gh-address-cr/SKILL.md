@@ -114,10 +114,12 @@ The only requirement is that the upstream review step emits findings in the acce
 
 ## Core Rules
 
-1. Pick exactly one `mode` and, when required, exactly one `producer`.
-2. Use the high-level dispatcher first:
-  - `python3 scripts/cli.py control-plane <mode> [producer] <owner/repo> <pr_number> ...`
-   - or `python3 scripts/cli.py cr-loop <mode> [producer] <owner/repo> <pr_number> ...` for multi-iteration execution
+1. Use the high-level task entrypoints first:
+  - `python3 scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-]`
+  - `python3 scripts/cli.py threads <owner/repo> <pr_number>`
+  - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|-`
+  - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>`
+2. Use `control-plane` or `cr-loop <mode> [producer]` only when the high-level entrypoints do not fit.
 3. Process only unresolved GitHub threads and open local findings.
 4. For GitHub review threads, reply and resolve are both mandatory.
 5. For local findings, terminal handling must include a note.

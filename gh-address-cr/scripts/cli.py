@@ -46,6 +46,39 @@ def rewrite_alias_args(command: str, passthrough_args: list[str]) -> list[str]:
     return passthrough_args
 
 
+def alias_help(command: str) -> str:
+    if command == "review":
+        return (
+            "usage: cli.py review <owner/repo> <pr_number> [--input <path>|-]\n\n"
+            "High-level PR review entrypoint.\n\n"
+            "Maps to: cr-loop mixed code-review\n"
+            "Use when an upstream review producer emits findings JSON first.\n"
+            "Prefer --input - with stdin for findings produced in the current step.\n"
+        )
+    if command == "threads":
+        return (
+            "usage: cli.py threads <owner/repo> <pr_number>\n\n"
+            "High-level GitHub review-thread entrypoint.\n\n"
+            "Maps to: cr-loop remote\n"
+            "Use when only GitHub review threads need processing.\n"
+        )
+    if command == "findings":
+        return (
+            "usage: cli.py findings <owner/repo> <pr_number> --input <path>|-\n\n"
+            "High-level local findings entrypoint.\n\n"
+            "Maps to: cr-loop local json\n"
+            "Use when findings already exist as JSON or are piped in through stdin.\n"
+        )
+    if command == "adapter":
+        return (
+            "usage: cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>\n\n"
+            "High-level adapter entrypoint.\n\n"
+            "Maps to: cr-loop mixed adapter\n"
+            "Use when an adapter command prints findings JSON.\n"
+        )
+    return ""
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Unified Python CLI for gh-address-cr.",
@@ -80,6 +113,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.command in HIGH_LEVEL_COMMANDS and args.args and args.args[0] in {"-h", "--help"}:
+        print(alias_help(args.command), end="")
+        return 0
     target = SCRIPT_DIR / COMMAND_TO_SCRIPT[args.command]
     rewritten_args = rewrite_alias_args(args.command, args.args)
     result = subprocess.run([sys.executable, str(target), *rewritten_args], text=True, capture_output=True)

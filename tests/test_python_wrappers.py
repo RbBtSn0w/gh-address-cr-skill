@@ -33,6 +33,13 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertIn("run-once", result.stdout)
         self.assertIn("session-engine", result.stdout)
 
+    def test_cli_review_help_uses_high_level_alias_text(self):
+        result = self.run_cmd([sys.executable, str(CLI_PY), "review", "--help"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("usage: cli.py review", result.stdout)
+        self.assertIn("Maps to: cr-loop mixed code-review", result.stdout)
+        self.assertNotIn("{ingest,local,mixed,remote}", result.stdout)
+
     def test_cli_review_alias_requires_findings_input(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0)
