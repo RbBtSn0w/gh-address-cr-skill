@@ -285,9 +285,9 @@ from GitHub thread state; the main downside is potential repeated work.
 The implementation model is now:
 
 - Python owns the stateful logic and GitHub/local-review orchestration.
-- `scripts/gh-address-cr.sh` is the only shell compatibility entrypoint; internal commands use the Python CLI directly.
+- `python3 gh-address-cr/scripts/cli.py` is the only automation entrypoint; internal commands use the Python CLI directly.
 - `gh-address-cr/scripts/cli.py` is the unified Python dispatcher for the main command set.
-- Tests are organized around Python behavior first, then shell wrapper syntax compatibility.
+- Tests are organized around Python behavior first, then CLI syntax compatibility.
 
 - `github_thread` items are synced from GraphQL thread snapshots.
 - `local_finding` items are ingested from a local review adapter.
@@ -432,7 +432,7 @@ The main logic now lives in Python under `gh-address-cr/scripts/`:
 
 These Python entrypoints require Python 3.10+ because the implementation uses modern typing syntax such as `list[str]` and `str | None`.
 
-The single shell wrapper `scripts/gh-address-cr.sh` is kept for compatibility; all internal commands use the Python CLI directly.
+The Python CLI is the stable automation surface; all internal commands use the Python CLI directly.
 
 Unified CLI examples:
 
@@ -452,7 +452,7 @@ Run the current automated checks with:
 
 ```bash
 python3 -m unittest discover -s tests
-bash -n gh-address-cr/scripts/gh-address-cr.sh
+bash -n gh-address-cr/python3 gh-address-cr/scripts/cli.py
 ```
 
 Current test layout:
@@ -519,7 +519,7 @@ npx skills update
 - Mandatory final gate (`python3 gh-address-cr/scripts/cli.py final-gate`) before completion
 - Session-scoped state tracking to avoid duplicate work
 - Audit log + audit summary + summary hash output
-- Python-first implementation with shell compatibility wrappers
+- Python-first implementation with a single CLI entrypoint
 - Module-split automated tests for session, wrappers, and helper scripts
 
 ## Skill folder
@@ -528,7 +528,7 @@ npx skills update
   - `SKILL.md`
   - `agents/openai.yaml`
   - `scripts/*.py`
-  - `scripts/gh-address-cr.sh` (compat wrapper)
+  - `python3 gh-address-cr/scripts/cli.py` (compat entrypoint)
   - `assets/reply-templates/*`
   - `references/cr-triage-checklist.md`
 
@@ -675,7 +675,7 @@ python3 gh-address-cr/scripts/cli.py session-engine reclaim-stale-claims owner/r
 Rules:
 
 - `cli.py` is the preferred Python entrypoint for automation
-- `scripts/gh-address-cr.sh` remains the stable shell compatibility surface for skill users
+- `python3 gh-address-cr/scripts/cli.py` remains the stable automation surface for skill users
 
 ## Troubleshooting final gate failure
 

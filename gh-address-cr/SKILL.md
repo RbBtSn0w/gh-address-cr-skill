@@ -307,7 +307,7 @@ Final output must include:
 
 - dispatch matrix: `references/mode-producer-matrix.md`
 - checklist: `references/cr-triage-checklist.md`
-- stable operator surface: `scripts/gh-address-cr.sh`
+- stable operator surface: `python3 gh-address-cr/scripts/cli.py`
 - preferred automation surface: `python3 scripts/cli.py ...`
 - code-review bridge prompt: `python3 scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>`
 - Markdown-to-findings converter: `python3 scripts/cli.py review-to-findings <owner/repo> <pr_number> --input -`
