@@ -88,6 +88,15 @@ Machine summary contract:
 - `next_action`
 - `exit_code`
 
+Examples:
+
+```text
+$gh-address-cr review <PR_URL> --machine
+$gh-address-cr threads <PR_URL> --machine
+$gh-address-cr findings <PR_URL> --input findings.json --machine
+$gh-address-cr adapter <PR_URL> <adapter_cmd...> --machine
+```
+
 Do not create ad-hoc temporary files like `dummy.json` or `empty.json` in the project workspace just to drive the workflow.
 
 Accepted findings shapes:

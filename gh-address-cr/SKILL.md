@@ -43,6 +43,15 @@ Machine summary contract:
 - `next_action`
 - `exit_code`
 
+Examples:
+
+```text
+$gh-address-cr review <PR_URL> --machine
+$gh-address-cr threads <PR_URL> --machine
+$gh-address-cr findings <PR_URL> --input findings.json --machine
+$gh-address-cr adapter <PR_URL> <adapter_cmd...> --machine
+```
+
 Advanced dispatch model:
 
 - `mode`

@@ -28,6 +28,15 @@ Recommended invocation model:
 
 Use `--machine` when the caller is an AI agent and needs a stable JSON summary instead of human-oriented text.
 
+Examples:
+
+```text
+$gh-address-cr review <PR_URL> --machine
+$gh-address-cr threads <PR_URL> --machine
+$gh-address-cr findings <PR_URL> --input findings.json --machine
+$gh-address-cr adapter <PR_URL> <adapter_cmd...> --machine
+```
+
 Machine summary contract:
 
 - `status`
