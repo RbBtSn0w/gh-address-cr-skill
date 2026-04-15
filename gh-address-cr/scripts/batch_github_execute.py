@@ -108,9 +108,9 @@ def main() -> int:
 
     pending_after = list_pending_review_ids(args.repo, args.pr_number, login)
     submitted = []
-    new_pending = sorted(pending_after - pending_before)
-    if new_pending:
-        submitted = submit_pending_reviews(args.repo, args.pr_number, new_pending)
+    current_pending = sorted(pending_after)
+    if current_pending:
+        submitted = submit_pending_reviews(args.repo, args.pr_number, current_pending)
 
     audit_event(
         "batch_github_execute",
@@ -122,7 +122,7 @@ def main() -> int:
         {
             "actions_count": len(actions),
             "pending_before": sorted(pending_before),
-            "pending_after": sorted(pending_after),
+            "pending_after": current_pending,
             "submitted": submitted,
         },
     )

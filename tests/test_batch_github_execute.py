@@ -36,7 +36,7 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
             sys.path.pop(0)
         return module
 
-    def test_batch_github_execute_submits_only_new_pending_reviews(self):
+    def test_batch_github_execute_submits_current_pending_reviews(self):
         module = self.load_module()
         action_payload = json.dumps(
             [
@@ -93,7 +93,7 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
             rc = module.main()
 
         self.assertEqual(rc, 0)
-        self.assertEqual(submitted, [22])
+        self.assertEqual(submitted, [11, 22])
 
     def test_batch_github_execute_returns_nonzero_when_graphql_fails(self):
         module = self.load_module()
