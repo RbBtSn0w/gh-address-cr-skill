@@ -1333,6 +1333,76 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("position=4", result.stdout)
 
+    def test_publish_finding_python_reports_structured_success(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+if args[:3] == ['pr', 'view', '77']:
+    print('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
+elif args[:2] == ['api', 'repos/octo/example/pulls/77/files']:
+    page = next((arg.split('=')[1] for arg in args if arg.startswith('page=')), '1')
+    if page == '1':
+        print(json.dumps([{'filename':'src/a.py','patch':'@@ -1,1 +1,4 @@\\n line1\\n+line2\\n+line3\\n+line4'}]))
+    else:
+        print('[]')
+elif args[:2] == ['api', 'repos/octo/example/pulls/77/comments']:
+    print(json.dumps({'id': 321, 'html_url': 'https://example.test/comment/321'}))
+else:
+    raise SystemExit(f'unhandled gh args: {args}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
+        payload = json.dumps(
+            [
+                {
+                    "title": "Publish me",
+                    "body": "Non-dry-run publication.",
+                    "path": "src/a.py",
+                    "line": 4,
+                    "severity": "P3",
+                    "category": "docs",
+                }
+            ]
+        )
+        self.run_cmd(
+            [sys.executable, str(SCRIPT), "ingest-local", self.repo, self.pr, "--source", "local-agent:test"],
+            stdin=payload,
+            check=True,
+        )
+        list_result = self.run_cmd([sys.executable, str(SCRIPT), "list-items", self.repo, self.pr, "--item-kind", "local_finding"], check=True)
+        item_id = json.loads(list_result.stdout.strip())["item_id"]
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(PUBLISH_FINDING_PY),
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+                item_id,
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "succeeded")
+        self.assertEqual(summary["remote_status"], "succeeded")
+        self.assertEqual(summary["session_status"], "succeeded")
+        self.assertEqual(summary["comment_id"], 321)
+        self.assertEqual(summary["comment_url"], "https://example.test/comment/321")
+
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        item = session["items"][item_id]
+        self.assertTrue(item["published"])
+        self.assertEqual(item["published_ref"], "321")
+
     def test_run_once_python_syncs_session_with_mocked_gh(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
@@ -1554,11 +1624,6 @@ elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/exam
     state_file.write_text(json.dumps(payload))
     if 'page=2' in args[1]:
         print(json.dumps([]))
-    elif payload['review_calls'] == 1:
-        print(json.dumps([
-            {{'node_id': 'REV_NODE_202', 'id': 202, 'state': 'COMMENTED', 'user': {{'login': 'octocat'}}}},
-            {{'node_id': 'REV_NODE_303', 'id': 303, 'state': 'PENDING', 'user': {{'login': 'someone-else'}}}}
-        ]))
     else:
         print(json.dumps([
             {{'node_id': 'REV_NODE_101', 'id': 101, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}},
@@ -1587,7 +1652,11 @@ else:
             ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("https://example.test/reply", result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "succeeded")
+        self.assertEqual(payload["reply_status"], "succeeded")
+        self.assertEqual(payload["review_submit_status"], "succeeded")
+        self.assertEqual(payload["reply_url"], "https://example.test/reply")
         state = json.loads((Path(self.temp_dir.name) / "gh_state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["submitted"], ["REV_NODE_101"])
 
@@ -1648,8 +1717,73 @@ else:
             ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "succeeded")
+        self.assertEqual(payload["reply_status"], "succeeded")
+        self.assertEqual(payload["review_submit_status"], "succeeded")
+        self.assertEqual(payload["reply_url"], "https://example.test/reply-existing")
         state = json.loads((Path(self.temp_dir.name) / "gh_state_existing.json").read_text(encoding="utf-8"))
         self.assertEqual(state["submitted"], ["777"])
+
+    def test_post_reply_reports_unknown_when_submit_fails_after_reply(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+state_file = Path({str((Path(self.temp_dir.name) / "gh_state_submit_fail.json").as_posix())!r})
+if not state_file.exists():
+    state_file.write_text(json.dumps({{"submitted": [], "review_calls": 0}}))
+
+args = sys.argv[1:]
+if args[:2] == ['api', 'graphql']:
+    query = next((arg.split('=', 1)[1] for arg in args if arg.startswith('query=')), '')
+    if 'submitPullRequestReview' in query:
+        sys.stderr.write('submit failed\\n')
+        raise SystemExit(1)
+    print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply-partial'}}}}}}}}))
+elif args[:2] == ['api', 'user']:
+    print(json.dumps({{'login': 'octocat'}}))
+elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('repos/octo/example/pulls/77/reviews'):
+    payload = json.loads(state_file.read_text())
+    payload['review_calls'] += 1
+    state_file.write_text(json.dumps(payload))
+    if 'page=2' in args[1]:
+        print(json.dumps([]))
+    else:
+        print(json.dumps([
+            {{'node_id': 'REV_NODE_888', 'id': 888, 'state': 'PENDING', 'user': {{'login': 'octocat'}}}}
+        ]))
+else:
+    raise SystemExit(f'unhandled gh args: {{args}}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        reply_file = Path(self.temp_dir.name) / "reply-partial.md"
+        reply_file.write_text("Reply body", encoding="utf-8")
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(POST_REPLY_PY),
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+                "THREAD_REPLY",
+                str(reply_file),
+            ]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "unknown")
+        self.assertEqual(payload["reply_status"], "succeeded")
+        self.assertEqual(payload["review_submit_status"], "unknown")
+        self.assertEqual(payload["reply_url"], "https://example.test/reply-partial")
+        self.assertIn("submit failed", payload["error"])
 
     def test_cli_machine_rejects_unsupported_subcommand_before_running_it(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", "final-gate", self.repo, self.pr])
@@ -1798,6 +1932,11 @@ else:
             ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "succeeded")
+        self.assertEqual(payload["remote_status"], "succeeded")
+        self.assertEqual(payload["session_status"], "succeeded")
+        self.assertTrue(payload["resolved"])
         session = json.loads(self.session_file().read_text(encoding="utf-8"))
         item = session["items"]["github-thread:THREAD_RESOLVE"]
         self.assertEqual(item["status"], "CLOSED")
@@ -1840,6 +1979,9 @@ else:
             ]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "succeeded")
+        self.assertEqual(payload["session_status"], "missing")
         handled_file = self.github_dir() / "handled_threads.txt"
         self.assertIn("THREAD_ONLY_REMOTE", handled_file.read_text(encoding="utf-8"))
 

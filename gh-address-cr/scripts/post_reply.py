@@ -2,10 +2,11 @@
 from __future__ import annotations
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
-from python_common import audit_event, gh_read_json, gh_write_cmd, gh_write_json
+from python_common import audit_event, gh_read_json, gh_write_cmd, is_transient_gh_failure
 
 
 def current_login() -> str:
@@ -31,8 +32,12 @@ def list_pending_review_ids(repo: str, pr_number: str, login: str) -> set[str]:
 
 
 def submit_pending_reviews(repo: str, pr_number: str, review_ids: list[str]) -> list[str]:
+    return submit_pending_reviews_result(repo, pr_number, review_ids)["submitted"]
+
+
+def submit_pending_reviews_result(repo: str, pr_number: str, review_ids: list[str]) -> dict:
     if not review_ids:
-        return []
+        return {"status": "skipped", "submitted": [], "error": None}
 
     submitted: list[str] = []
 
@@ -50,14 +55,41 @@ def submit_pending_reviews(repo: str, pr_number: str, review_ids: list[str]) -> 
     var_str = ", ".join(f"${k}: {v}" for k, v in variables.items())
     query = f"mutation({var_str}) {{ {' '.join(query_parts)} }}"
 
-    payload = gh_write_json(["api", "graphql", "-f", f"query={query}", *flags])
+    result = gh_write_cmd(["gh", "api", "graphql", "-f", f"query={query}", *flags], check=False)
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        payload = {}
     data = payload.get("data") or {}
+    errors = payload.get("errors") or []
 
     for i, node_id in enumerate(review_ids):
         if f"submit{i}" in data and data[f"submit{i}"]:
             submitted.append(node_id)
 
-    return submitted
+    if result.returncode != 0:
+        status = "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "unknown"
+        return {"status": status, "submitted": submitted, "error": result.stderr or "submit pending reviews failed"}
+    if errors:
+        return {
+            "status": "unknown",
+            "submitted": submitted,
+            "error": "; ".join(error.get("message", "GraphQL error") for error in errors),
+        }
+    if set(submitted) != set(review_ids):
+        return {
+            "status": "unknown",
+            "submitted": submitted,
+            "error": "submit pending reviews response was incomplete",
+        }
+    return {"status": "succeeded", "submitted": submitted, "error": None}
+
+
+def emit_result(payload: dict, exit_code: int, *, error_message: str | None = None) -> int:
+    sys.stdout.write(json.dumps(payload))
+    if error_message:
+        print(error_message, file=sys.stderr)
+    return exit_code
 
 
 def main() -> int:
@@ -98,38 +130,110 @@ def main() -> int:
         "mutation($threadId:ID!,$body:String!){ "
         "addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){ comment{ url } } }"
     )
-    pending_before: set[str] = set()
-    login = ""
-    if args.repo and args.pr_number:
-        login = current_login()
-        pending_before = list_pending_review_ids(args.repo, args.pr_number, login)
-    result = gh_write_cmd(
-        ["gh", "api", "graphql", "-f", f"query={query}", "-F", f"threadId={args.thread_id}", "-F", f"body={reply_body}"],
-        check=True,
-    )
-    sys.stdout.write(result.stdout)
-    if args.repo and args.pr_number:
-        payload = json.loads(result.stdout)
-        reply_url = payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url", "")
-        pending_after = list_pending_review_ids(args.repo, args.pr_number, login)
-        submitted_pending_reviews = submit_pending_reviews(args.repo, args.pr_number, sorted(pending_after))
+    payload = {
+        "action": "post_reply",
+        "status": "failed",
+        "thread_id": args.thread_id,
+        "reply_status": "failed",
+        "review_submit_status": "skipped",
+        "reply_url": None,
+        "submitted_pending_reviews": [],
+        "error": None,
+    }
+    try:
+        login = current_login() if args.repo and args.pr_number else ""
+        result = gh_write_cmd(
+            ["gh", "api", "graphql", "-f", f"query={query}", "-F", f"threadId={args.thread_id}", "-F", f"body={reply_body}"],
+            check=False,
+        )
+        if result.returncode != 0:
+            payload["status"] = "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "failed"
+            payload["error"] = result.stderr or "reply failed"
+            audit_event(
+                "post_reply",
+                "failed",
+                args.repo,
+                args.pr_number,
+                args.audit_id,
+                "Failed to post thread reply",
+                {"thread_id": args.thread_id, "reply_file": str(reply_file), "error": payload["error"]},
+            )
+            return emit_result(payload, 1, error_message=payload["error"])
+
+        try:
+            reply_payload = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError:
+            payload["status"] = "failed"
+            payload["error"] = "reply response was not valid JSON"
+            return emit_result(payload, 1, error_message=payload["error"])
+        reply_url = reply_payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url", "")
+        if not reply_url:
+            payload["status"] = "unknown"
+            payload["error"] = "reply succeeded with no comment url in response"
+            return emit_result(payload, 1, error_message=payload["error"])
+
+        payload["reply_status"] = "succeeded"
+        payload["reply_url"] = reply_url
+
+        pending_after: set[str] = set()
+        submit_result = {"status": "skipped", "submitted": [], "error": None}
+        if args.repo and args.pr_number:
+            pending_after = list_pending_review_ids(args.repo, args.pr_number, login)
+            submit_result = submit_pending_reviews_result(args.repo, args.pr_number, sorted(pending_after))
+            payload["review_submit_status"] = submit_result["status"]
+            payload["submitted_pending_reviews"] = submit_result["submitted"]
+
+        if payload["review_submit_status"] in {"skipped", "succeeded"}:
+            payload["status"] = "succeeded"
+            audit_event(
+                "post_reply",
+                "ok",
+                args.repo,
+                args.pr_number,
+                args.audit_id,
+                "Posted thread reply",
+                {
+                    "thread_id": args.thread_id,
+                    "reply_file": str(reply_file),
+                    "reply_url": reply_url,
+                    "pending_reviews_after": sorted(pending_after),
+                    "submitted_pending_reviews": submit_result["submitted"],
+                },
+            )
+            return emit_result(payload, 0)
+
+        payload["status"] = "unknown"
+        payload["error"] = submit_result["error"] or "reply posted but review submission did not complete"
         audit_event(
             "post_reply",
-            "ok",
+            "partial",
             args.repo,
             args.pr_number,
             args.audit_id,
-            "Posted thread reply",
+            "Posted thread reply but review submission did not complete",
             {
                 "thread_id": args.thread_id,
                 "reply_file": str(reply_file),
                 "reply_url": reply_url,
-                "pending_reviews_before": sorted(pending_before),
                 "pending_reviews_after": sorted(pending_after),
-                "submitted_pending_reviews": submitted_pending_reviews,
+                "submitted_pending_reviews": submit_result["submitted"],
+                "error": payload["error"],
             },
         )
-    return 0
+        return emit_result(payload, 1, error_message=payload["error"])
+    except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        payload["status"] = "unknown" if payload["reply_status"] == "succeeded" else "failed"
+        payload["error"] = (getattr(exc, "stderr", "") or getattr(exc, "stdout", "") or str(exc)).strip()
+        audit_event(
+            "post_reply",
+            "partial" if payload["reply_status"] == "succeeded" else "failed",
+            args.repo,
+            args.pr_number,
+            args.audit_id,
+            "Post reply command failed",
+            {"thread_id": args.thread_id, "reply_file": str(reply_file), "error": payload["error"]},
+        )
+        return emit_result(payload, 1, error_message=payload["error"])
 
 
 if __name__ == "__main__":

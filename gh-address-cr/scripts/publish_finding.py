@@ -2,10 +2,11 @@
 from __future__ import annotations
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
-from python_common import audit_event, gh_read_cmd, gh_read_json, gh_write_json, run_cmd
+from python_common import audit_event, gh_read_cmd, gh_read_json, gh_write_cmd, is_transient_gh_failure, run_cmd
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -74,6 +75,13 @@ def compute_diff_position(files: list[dict], target_path: str, target_line: int)
     raise SystemExit(f"Unable to compute diff position for {target_path}:{target_line}")
 
 
+def emit_result(payload: dict, exit_code: int, *, error_message: str | None = None) -> int:
+    sys.stdout.write(json.dumps(payload))
+    if error_message:
+        print(error_message, file=sys.stderr)
+    return exit_code
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Publish a local finding back to GitHub review comments.")
     parser.add_argument("--dry-run", action="store_true")
@@ -104,13 +112,38 @@ def main() -> int:
         f"{item.get('body', '')}"
     )
 
-    head_sha_result = gh_read_cmd(
-        ["gh", "pr", "view", args.pr, "--repo", args.repo, "--json", "headRefOid", "-q", ".headRefOid"],
-        check=True,
-    )
-    head_sha = head_sha_result.stdout.strip()
-    files = load_pr_files(args.repo, args.pr)
-    diff_position = compute_diff_position(files, path_value, int(line_value))
+    payload = {
+        "action": "publish_finding",
+        "status": "failed",
+        "local_item_id": args.local_item_id,
+        "remote_status": "failed",
+        "session_status": "skipped",
+        "comment_id": None,
+        "comment_url": None,
+        "error": None,
+    }
+
+    try:
+        head_sha_result = gh_read_cmd(
+            ["gh", "pr", "view", args.pr, "--repo", args.repo, "--json", "headRefOid", "-q", ".headRefOid"],
+            check=True,
+        )
+        head_sha = head_sha_result.stdout.strip()
+        files = load_pr_files(args.repo, args.pr)
+        diff_position = compute_diff_position(files, path_value, int(line_value))
+    except subprocess.CalledProcessError as exc:
+        payload["status"] = "retryable" if is_transient_gh_failure(exc.stderr, exc.stdout, exc.returncode) else "failed"
+        payload["error"] = (exc.stderr or exc.stdout or str(exc)).strip()
+        audit_event(
+            "publish_finding",
+            "failed",
+            args.repo,
+            args.pr,
+            args.audit_id,
+            "Failed to prepare finding publication",
+            {"item_id": args.local_item_id, "error": payload["error"]},
+        )
+        return emit_result(payload, exc.returncode or 1, error_message=payload["error"])
 
     if args.dry_run:
         print(f"[dry-run] Would publish local finding: {args.local_item_id}")
@@ -138,37 +171,83 @@ def main() -> int:
         )
         return 0
 
-    payload = {
+    request_payload = {
         "body": comment_body,
         "commit_id": head_sha,
         "path": path_value,
         "position": diff_position,
     }
-    comment = gh_write_json(
-        ["api", f"repos/{args.repo}/pulls/{args.pr}/comments", "--method", "POST", "--input", "-"],
-        input_text=json.dumps(payload),
+    result = gh_write_cmd(
+        ["gh", "api", f"repos/{args.repo}/pulls/{args.pr}/comments", "--method", "POST", "--input", "-"],
+        input_text=json.dumps(request_payload),
+        check=False,
     )
-    sys.stdout.write(json.dumps(comment))
-
-    run_cmd(
-        [
-            sys.executable,
-            str(SESSION_ENGINE),
-            "mark-published",
+    if result.returncode != 0:
+        payload["status"] = "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "failed"
+        payload["error"] = result.stderr or "publish finding failed"
+        audit_event(
+            "publish_finding",
+            "failed",
             args.repo,
             args.pr,
-            args.local_item_id,
-            "--published-ref",
-            str(comment["id"]),
-            "--url",
-            comment.get("html_url", ""),
-            "--note",
-            "Published local finding to GitHub review comments.",
-            "--actor",
+            args.audit_id,
+            "Failed to publish local finding to GitHub review comments",
+            {"item_id": args.local_item_id, "error": payload["error"]},
+        )
+        return emit_result(payload, 1, error_message=payload["error"])
+
+    try:
+        comment = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        payload["status"] = "failed"
+        payload["error"] = "publish response was not valid JSON"
+        return emit_result(payload, 1, error_message=payload["error"])
+    payload["remote_status"] = "succeeded"
+    payload["comment_id"] = comment.get("id")
+    payload["comment_url"] = comment.get("html_url", "")
+
+    try:
+        run_cmd(
+            [
+                sys.executable,
+                str(SESSION_ENGINE),
+                "mark-published",
+                args.repo,
+                args.pr,
+                args.local_item_id,
+                "--published-ref",
+                str(comment["id"]),
+                "--url",
+                comment.get("html_url", ""),
+                "--note",
+                "Published local finding to GitHub review comments.",
+                "--actor",
+                "publish_finding",
+            ],
+            check=True,
+        )
+    except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        payload["status"] = "unknown"
+        payload["session_status"] = "failed"
+        payload["error"] = (getattr(exc, "stderr", "") or getattr(exc, "stdout", "") or str(exc)).strip()
+        audit_event(
             "publish_finding",
-        ],
-        check=True,
-    )
+            "partial",
+            args.repo,
+            args.pr,
+            args.audit_id,
+            "Published finding remotely but session update failed",
+            {
+                "item_id": args.local_item_id,
+                "comment_id": comment.get("id"),
+                "comment_url": comment.get("html_url", ""),
+                "error": payload["error"],
+            },
+        )
+        return emit_result(payload, exc.returncode or 1, error_message=payload["error"])
+
+    payload["status"] = "succeeded"
+    payload["session_status"] = "succeeded"
     audit_event(
         "publish_finding",
         "ok",
@@ -186,7 +265,7 @@ def main() -> int:
             "comment_url": comment.get("html_url", ""),
         },
     )
-    return 0
+    return emit_result(payload, 0)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 
-from post_reply import list_pending_review_ids, submit_pending_reviews, current_login
+from post_reply import current_login, list_pending_review_ids, submit_pending_reviews_result
 from python_common import gh_write_cmd, audit_event, is_transient_gh_failure
 
 def chunk_actions(actions: list[dict], max_size: int) -> list[list[dict]]:
@@ -140,10 +140,16 @@ def main() -> int:
                 results[item_id] = item_result(status="unknown", error=result.stderr or "GraphQL response was incomplete", reply_url=reply_url, resolved=resolved)
 
     pending_after = list_pending_review_ids(args.repo, args.pr_number, login)
-    submitted = []
     current_pending = sorted(pending_after)
+    submit_result = {"status": "skipped", "submitted": [], "error": None}
     if current_pending:
-        submitted = submit_pending_reviews(args.repo, args.pr_number, current_pending)
+        submit_result = submit_pending_reviews_result(args.repo, args.pr_number, current_pending)
+        if submit_result["status"] not in {"skipped", "succeeded"}:
+            had_error = True
+            for value in results.values():
+                if value.get("status") == "succeeded":
+                    value["status"] = "unknown"
+                    value["error"] = submit_result["error"] or "batch actions succeeded but review submission did not complete"
 
     audit_event(
         "batch_github_execute",
@@ -156,7 +162,9 @@ def main() -> int:
             "actions_count": len(actions),
             "pending_before": sorted(pending_before),
             "pending_after": current_pending,
-            "submitted": submitted,
+            "submitted": submit_result["submitted"],
+            "submit_status": submit_result["status"],
+            "submit_error": submit_result["error"],
             "result_status_counts": {
                 "succeeded": sum(1 for value in results.values() if value.get("status") == "succeeded"),
                 "failed": sum(1 for value in results.values() if value.get("status") == "failed"),

@@ -54,9 +54,9 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         def fake_list_pending_review_ids(repo, pr_number, login):
             return pending_sets.pop(0)
 
-        def fake_submit_pending_reviews(repo, pr_number, review_ids):
+        def fake_submit_pending_reviews_result(repo, pr_number, review_ids):
             submitted.extend(review_ids)
-            return list(review_ids)
+            return {"status": "succeeded", "submitted": list(review_ids), "error": None}
 
         def fake_write_cmd(cmd, *, input_text=None, check=False):
             self.assertIn("gh", cmd[0])
@@ -76,7 +76,7 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
             )
 
         module.list_pending_review_ids = fake_list_pending_review_ids
-        module.submit_pending_reviews = fake_submit_pending_reviews
+        module.submit_pending_reviews_result = fake_submit_pending_reviews_result
         module.current_login = lambda: "tester"
         module.gh_write_cmd = fake_write_cmd
         module.audit_event = lambda *args, **kwargs: None
@@ -116,15 +116,15 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         def fake_list_pending_review_ids(repo, pr_number, login):
             return set()
 
-        def fake_submit_pending_reviews(repo, pr_number, review_ids):
+        def fake_submit_pending_reviews_result(repo, pr_number, review_ids):
             submitted.extend(review_ids)
-            return list(review_ids)
+            return {"status": "succeeded", "submitted": list(review_ids), "error": None}
 
         def fake_write_cmd(cmd, *, input_text=None, check=False):
             return subprocess.CompletedProcess(cmd, 1, "", "graphql failed")
 
         module.list_pending_review_ids = fake_list_pending_review_ids
-        module.submit_pending_reviews = fake_submit_pending_reviews
+        module.submit_pending_reviews_result = fake_submit_pending_reviews_result
         module.current_login = lambda: "tester"
         module.gh_write_cmd = fake_write_cmd
         module.is_transient_gh_failure = lambda *_args, **_kwargs: True
@@ -163,7 +163,7 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         audit_calls = []
 
         module.list_pending_review_ids = lambda *_args, **_kwargs: set()
-        module.submit_pending_reviews = lambda *_args, **_kwargs: submitted
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {"status": "skipped", "submitted": submitted, "error": None}
         module.current_login = lambda: "tester"
         module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("gh_write_cmd should not be called"))
         module.audit_event = lambda *args, **kwargs: audit_calls.append((args, kwargs))
@@ -185,3 +185,56 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         self.assertEqual(payload["github-thread:MISSING_THREAD_ID"]["status"], "failed")
         self.assertIn("thread_id", payload["github-thread:MISSING_THREAD_ID"]["error"])
         self.assertTrue(audit_calls)
+
+    def test_batch_github_execute_marks_successful_actions_unknown_when_submit_is_partial(self):
+        module = self.load_module()
+        action_payload = json.dumps(
+            [
+                {
+                    "item_id": "github-thread:THREAD_3",
+                    "thread_id": "THREAD_3",
+                    "reply_body": "Reply body",
+                    "resolve": True,
+                }
+            ]
+        )
+
+        module.list_pending_review_ids = lambda *_args, **_kwargs: {11}
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {
+            "status": "unknown",
+            "submitted": [],
+            "error": "submit pending reviews failed",
+        }
+        module.current_login = lambda: "tester"
+        module.gh_write_cmd = lambda cmd, *, input_text=None, check=False: subprocess.CompletedProcess(
+            cmd,
+            0,
+            json.dumps(
+                {
+                    "data": {
+                        "reply0": {"comment": {"url": "https://example.test/reply"}},
+                        "resolve0": {"thread": {"id": "THREAD_3", "isResolved": True}},
+                    }
+                }
+            ),
+            "",
+        )
+        module.audit_event = lambda *args, **kwargs: None
+
+        with patched_argv(
+            [
+                "batch_github_execute.py",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+            ]
+        ), patched_stdin(action_payload):
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                rc = module.main()
+                payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(payload["github-thread:THREAD_3"]["status"], "unknown")
+        self.assertEqual(payload["github-thread:THREAD_3"]["reply_url"], "https://example.test/reply")
+        self.assertIn("submit pending reviews failed", payload["github-thread:THREAD_3"]["error"])
