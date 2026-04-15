@@ -33,45 +33,23 @@ Important:
 - `threads` handles GitHub threads only.
 - `findings` handles existing findings JSON only.
 - `adapter` handles a command that prints findings JSON.
-- High-level entrypoints emit machine-readable summaries by default.
-- Use `--human` only when a person needs narrative text.
-- `--machine` remains a compatibility alias for the default machine summary.
 
 Recommended high-level entrypoints:
 
 - `review`
   - default entrypoint
   - runs the full PR review workflow automatically once findings are supplied
-  - emits a machine-readable summary by default
 - `threads`
   - GitHub review threads only
-  - emits a machine-readable summary by default
 - `findings`
   - existing findings JSON only
-  - emits a machine-readable summary by default
 - `adapter`
   - adapter command prints findings JSON
-  - emits a machine-readable summary by default
-- `--human`
-  - human-oriented narrative text
-
-Machine summary contract:
-
-- `status`
-- `repo`
-- `pr_number`
-- `item_id`
-- `item_kind`
-- `counts`
-- `artifact_path`
-- `next_action`
-- `exit_code`
 
 Examples:
 
 ```text
 $gh-address-cr review <PR_URL>
-$gh-address-cr review <PR_URL> --human
 $gh-address-cr threads <PR_URL>
 $gh-address-cr findings <PR_URL> --input findings.json
 $gh-address-cr findings <PR_URL> --input - --sync
