@@ -214,7 +214,6 @@ The default review entrypoint runs repeated intake, item selection, action execu
 - Supported dispatch paths live in:
   - `references/mode-producer-matrix.md`
 
-For human-readable handoff prompt examples, use `README.md`. `SKILL.md` defines the execution contract and public entrypoints; it should not be treated as a prompt-template catalog.
 
 ## Discovery Rules
 
