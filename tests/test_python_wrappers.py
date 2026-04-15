@@ -26,6 +26,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         result = self.run_cmd([sys.executable, str(CLI_PY), "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--machine", result.stdout)
+        self.assertIn("--human", result.stdout)
         self.assertIn("review", result.stdout)
         self.assertIn("threads", result.stdout)
         self.assertIn("findings", result.stdout)
@@ -41,11 +42,13 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("usage: cli.py review", result.stdout)
         self.assertIn("High-level PR review entrypoint.", result.stdout)
+        self.assertIn("Default output is a structured JSON summary.", result.stdout)
+        self.assertIn("--human", result.stdout)
         self.assertIn("--machine", result.stdout)
         self.assertNotIn("cr-loop", result.stdout)
         self.assertNotIn("{ingest,local,mixed,remote}", result.stdout)
 
-    def test_cli_review_machine_emits_structured_summary(self):
+    def test_cli_review_defaults_to_structured_summary(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3
@@ -76,7 +79,6 @@ else:
             [
                 sys.executable,
                 str(CLI_PY),
-                "--machine",
                 "review",
                 self.repo,
                 self.pr,
@@ -98,6 +100,50 @@ else:
         self.assertEqual(summary["counts"]["blocking_items_count"], 0)
         self.assertIn("pr-77", summary["artifact_path"])
         self.assertEqual(summary["next_action"], "No action required.")
+
+    def test_cli_review_human_flag_keeps_human_text(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "review",
+                self.repo,
+                self.pr,
+                "--input",
+                "-",
+                "--human",
+            ],
+            stdin="[]",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cr-loop PASSED", result.stdout)
+        self.assertNotIn("\"status\"", result.stdout)
 
     def test_cli_review_machine_trailing_flag_emits_structured_summary(self):
         gh = self.bin_dir / "gh"
@@ -149,7 +195,10 @@ else:
     def test_cli_review_alias_requires_findings_input(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("requires findings JSON via --input or stdin", result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "FAILED")
+        self.assertIn("Inspect stderr", summary["next_action"])
+        self.assertEqual(summary["repo"], self.repo)
 
     def test_cli_findings_machine_reports_pause_summary(self):
         payload_file = Path(self.temp_dir.name) / "findings.json"
@@ -197,7 +246,7 @@ else:
         self.assertIn("loop-request-", summary["artifact_path"])
         self.assertIn("Address the finding", summary["next_action"])
 
-    def test_cli_threads_alias_dispatches_remote_loop(self):
+    def test_cli_threads_defaults_to_structured_summary(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3
@@ -226,7 +275,15 @@ else:
 
         result = self.run_cmd([sys.executable, str(CLI_PY), "threads", self.repo, self.pr])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("cr-loop PASSED", result.stdout)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "PASSED")
+        self.assertEqual(summary["repo"], self.repo)
+        self.assertEqual(summary["pr_number"], self.pr)
+        self.assertEqual(summary["exit_code"], 0)
+        self.assertEqual(summary["item_id"], None)
+        self.assertEqual(summary["item_kind"], None)
+        self.assertEqual(summary["next_action"], "No action required.")
+        self.assertEqual(summary["counts"]["blocking_items_count"], 0)
 
     def test_cli_threads_machine_emits_pass_summary(self):
         gh = self.bin_dir / "gh"
@@ -267,7 +324,7 @@ else:
         self.assertEqual(summary["next_action"], "No action required.")
         self.assertEqual(summary["counts"]["blocking_items_count"], 0)
 
-    def test_cli_findings_alias_dispatches_local_json_loop(self):
+    def test_cli_findings_defaults_to_structured_summary(self):
         payload_file = Path(self.temp_dir.name) / "findings.json"
         payload_file.write_text(
             json.dumps(
@@ -295,9 +352,16 @@ else:
             ]
         )
         self.assertEqual(result.returncode, 5, result.stderr)
-        self.assertIn("Created 1 local item", result.stdout)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["repo"], self.repo)
+        self.assertEqual(summary["pr_number"], self.pr)
+        self.assertEqual(summary["exit_code"], 5)
+        self.assertEqual(summary["item_kind"], "local_finding")
+        self.assertTrue(summary["item_id"].startswith("local-finding:"))
+        self.assertIn("Address the finding", summary["next_action"])
 
-    def test_cli_adapter_machine_emits_pass_summary(self):
+    def test_cli_adapter_defaults_to_structured_summary(self):
         adapter = Path(self.temp_dir.name) / "adapter.py"
         adapter.write_text("import json\nprint(json.dumps([]))\n", encoding="utf-8")
 
@@ -331,7 +395,6 @@ else:
             [
                 sys.executable,
                 str(CLI_PY),
-                "--machine",
                 "adapter",
                 self.repo,
                 self.pr,
@@ -1471,7 +1534,7 @@ else:
     def test_cli_machine_rejects_unsupported_subcommand_before_running_it(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", "final-gate", self.repo, self.pr])
         self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("--machine is only supported for review, threads, findings, and adapter.", result.stderr)
+        self.assertIn("--machine and --human are only supported for review, threads, findings, and adapter.", result.stderr)
         self.assertFalse(self.workspace_dir().exists())
 
     def test_final_gate_failure_message_reports_actual_failure_reasons(self):

@@ -33,21 +33,27 @@ Important:
 - `threads` handles GitHub threads only.
 - `findings` handles existing findings JSON only.
 - `adapter` handles a command that prints findings JSON.
-- `--machine` is optional and only changes the output shape for agent consumers.
+- High-level entrypoints emit machine-readable summaries by default.
+- Use `--human` only when a person needs narrative text.
+- `--machine` remains a compatibility alias for the default machine summary.
 
 Recommended high-level entrypoints:
 
 - `review`
   - default entrypoint
   - runs the full PR review workflow automatically once findings are supplied
+  - emits a machine-readable summary by default
 - `threads`
   - GitHub review threads only
+  - emits a machine-readable summary by default
 - `findings`
   - existing findings JSON only
+  - emits a machine-readable summary by default
 - `adapter`
   - adapter command prints findings JSON
-- `--machine`
-  - structured JSON summary for agent consumers
+  - emits a machine-readable summary by default
+- `--human`
+  - human-oriented narrative text
 
 Machine summary contract:
 
@@ -65,12 +71,11 @@ Examples:
 
 ```text
 $gh-address-cr review <PR_URL>
-$gh-address-cr review <PR_URL> --machine
+$gh-address-cr review <PR_URL> --human
 $gh-address-cr threads <PR_URL>
-$gh-address-cr threads <PR_URL> --machine
-$gh-address-cr findings <PR_URL> --input findings.json --machine
-$gh-address-cr findings <PR_URL> --input - --sync --machine
-$gh-address-cr adapter <PR_URL> <adapter_cmd...> --machine
+$gh-address-cr findings <PR_URL> --input findings.json
+$gh-address-cr findings <PR_URL> --input - --sync
+$gh-address-cr adapter <PR_URL> <adapter_cmd...>
 ```
 
 Advanced dispatch model:
@@ -108,10 +113,10 @@ $gh-address-cr review <PR_URL>
 Treat `SKILL.md` as the source of truth for using this skill.
 
 - Start from the high-level dispatcher:
-  - `python3 scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--machine]`
-  - `python3 scripts/cli.py threads <owner/repo> <pr_number> [--machine]`
-  - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|- [--sync] [--machine]`
-  - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...> [--machine]`
+  - `python3 scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-]`
+  - `python3 scripts/cli.py threads <owner/repo> <pr_number>`
+  - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|- [--sync]`
+  - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>`
 - Use `references/mode-producer-matrix.md` only for mode-specific dispatch details.
 - Do not rely on `agents/openai.yaml` for unique behavior; it is only a thin assistant-specific hint layer.
 

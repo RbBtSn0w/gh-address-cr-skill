@@ -26,6 +26,7 @@ Agent-first reading order:
 5. Then hand the JSON to `gh-address-cr` through the correct entrypoint.
 
 `review` is the default orchestrator, but it still needs findings input from one of the paths above.
+High-level entrypoints emit machine-readable JSON summaries by default. Use `--human` when a person needs narrative text. `--machine` remains a compatibility alias.
 
 Recommended invocation model:
 
@@ -36,19 +37,17 @@ Recommended invocation model:
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
 ```
 
-Use `--machine` when the caller is an AI agent and needs a stable JSON summary instead of human-oriented text.
 The exact machine summary fields are documented in `gh-address-cr/SKILL.md`.
 
 Examples:
 
 ```text
 $gh-address-cr review <PR_URL>
-$gh-address-cr review <PR_URL> --machine
+$gh-address-cr review <PR_URL> --human
 $gh-address-cr threads <PR_URL>
-$gh-address-cr threads <PR_URL> --machine
-$gh-address-cr findings <PR_URL> --input findings.json --machine
-$gh-address-cr findings <PR_URL> --input - --sync --machine
-$gh-address-cr adapter <PR_URL> <adapter_cmd...> --machine
+$gh-address-cr findings <PR_URL> --input findings.json
+$gh-address-cr findings <PR_URL> --input - --sync
+$gh-address-cr adapter <PR_URL> <adapter_cmd...>
 ```
 
 High-level entrypoints:
@@ -56,12 +55,16 @@ High-level entrypoints:
 - `review`
   - default entrypoint
   - runs the full PR review workflow automatically once findings are supplied
+  - emits a machine-readable JSON summary by default
 - `threads`
   - GitHub review threads only
+  - emits a machine-readable JSON summary by default
 - `findings`
   - existing findings JSON only
+  - emits a machine-readable JSON summary by default
 - `adapter`
   - adapter command prints findings JSON
+  - emits a machine-readable JSON summary by default
 
 Typical flows:
 
@@ -79,6 +82,9 @@ $gh-address-cr findings <PR_URL> --input findings.json --sync
 
 // Full PR workflow with the default review entrypoint
 $gh-address-cr review <PR_URL>
+
+// Switch to human-oriented text when a person is reading the output
+$gh-address-cr review <PR_URL> --human
 ```
 
 Prompt patterns:
@@ -165,7 +171,7 @@ The exact dispatch behavior for each supported `mode + producer` combination is 
 The preferred automation entrypoint is now:
 
 ```bash
-python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--machine]
+python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--human]
 ```
 
 ## Choosing Fixes
@@ -196,7 +202,7 @@ Do not stretch the PR just to silence a thread. If the item is valid but not app
 For the automatic review workflow, use:
 
 ```bash
-python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--machine]
+python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--human]
 ```
 
 For `producer=code-review`, generate the standardized bridge prompt with:

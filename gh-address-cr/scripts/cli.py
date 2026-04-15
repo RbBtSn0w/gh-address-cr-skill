@@ -37,16 +37,25 @@ COMMAND_TO_SCRIPT = {
 }
 
 HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter"}
+OUTPUT_FLAGS = {"--machine", "--human"}
 
 
-def normalize_machine_args(args: argparse.Namespace) -> bool:
-    if "--machine" not in args.args:
-        return True
-    if args.command not in HIGH_LEVEL_COMMANDS:
-        print("--machine is only supported for review, threads, findings, and adapter.", file=sys.stderr)
+def normalize_output_args(args: argparse.Namespace) -> bool:
+    inline_flags = {arg for arg in args.args if arg in OUTPUT_FLAGS}
+    requested_flags = set(inline_flags)
+    if args.machine:
+        requested_flags.add("--machine")
+    if args.human:
+        requested_flags.add("--human")
+    if requested_flags == {"--machine", "--human"}:
+        print("--machine and --human are mutually exclusive.", file=sys.stderr)
         return False
-    args.machine = True
-    args.args = [arg for arg in args.args if arg != "--machine"]
+    if args.command not in HIGH_LEVEL_COMMANDS and requested_flags:
+        print("--machine and --human are only supported for review, threads, findings, and adapter.", file=sys.stderr)
+        return False
+    args.machine = "--machine" in requested_flags
+    args.human = "--human" in requested_flags
+    args.args = [arg for arg in args.args if arg not in OUTPUT_FLAGS]
     return True
 
 
@@ -65,32 +74,36 @@ def rewrite_alias_args(command: str, passthrough_args: list[str]) -> list[str]:
 def alias_help(command: str) -> str:
     if command == "review":
         return (
-            "usage: cli.py review <owner/repo> <pr_number> --input <path>|- [--machine]\n\n"
+            "usage: cli.py review <owner/repo> <pr_number> --input <path>|- [--human|--machine]\n\n"
             "High-level PR review entrypoint.\n\n"
             "Use when you want the full PR review workflow to run automatically.\n"
             "Provide findings JSON via --input <path> or --input - with stdin.\n"
-            "Use --machine for a structured JSON summary.\n"
+            "Default output is a structured JSON summary. Use --human for narrative text.\n"
+            "--machine remains a compatibility alias for the default machine summary.\n"
         )
     if command == "threads":
         return (
-            "usage: cli.py threads <owner/repo> <pr_number> [--machine]\n\n"
+            "usage: cli.py threads <owner/repo> <pr_number> [--human|--machine]\n\n"
             "High-level GitHub review-thread entrypoint.\n\n"
             "Use when only GitHub review threads need processing.\n"
-            "Use --machine for a structured JSON summary.\n"
+            "Default output is a structured JSON summary. Use --human for narrative text.\n"
+            "--machine remains a compatibility alias for the default machine summary.\n"
         )
     if command == "findings":
         return (
-            "usage: cli.py findings <owner/repo> <pr_number> --input <path>|- [--machine]\n\n"
+            "usage: cli.py findings <owner/repo> <pr_number> --input <path>|- [--human|--machine]\n\n"
             "High-level local findings entrypoint.\n\n"
             "Use when findings already exist as JSON or are piped in through stdin.\n"
-            "Use --machine for a structured JSON summary.\n"
+            "Default output is a structured JSON summary. Use --human for narrative text.\n"
+            "--machine remains a compatibility alias for the default machine summary.\n"
         )
     if command == "adapter":
         return (
-            "usage: cli.py adapter <owner/repo> <pr_number> <adapter_cmd...> [--machine]\n\n"
+            "usage: cli.py adapter <owner/repo> <pr_number> <adapter_cmd...> [--human|--machine]\n\n"
             "High-level adapter entrypoint.\n\n"
             "Use when an adapter command prints findings JSON.\n"
-            "Use --machine for a structured JSON summary.\n"
+            "Default output is a structured JSON summary. Use --human for narrative text.\n"
+            "--machine remains a compatibility alias for the default machine summary.\n"
         )
     return ""
 
@@ -182,17 +195,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--machine",
         action="store_true",
-        help="Emit a structured JSON summary for the high-level entrypoint.",
+        help="Compatibility alias for the default structured JSON summary.",
+    )
+    parser.add_argument(
+        "--human",
+        action="store_true",
+        help="Emit human-oriented text instead of the default machine summary.",
     )
     parser.add_argument(
         "command",
         metavar="{review,threads,findings,adapter,review-to-findings}",
         help=(
             "High-level commands:\n"
-            "  cli.py review owner/repo 123 --input -\n"
-            "  cli.py threads owner/repo 123\n"
-            "  cli.py findings owner/repo 123 --input findings.json\n"
-            "  cli.py adapter owner/repo 123 python3 tools/review_adapter.py\n"
+            "  cli.py review owner/repo 123 --input - [--human]\n"
+            "  cli.py threads owner/repo 123 [--human]\n"
+            "  cli.py findings owner/repo 123 --input findings.json [--human]\n"
+            "  cli.py adapter owner/repo 123 python3 tools/review_adapter.py [--human]\n"
             "Utility commands:\n"
             "  cli.py review-to-findings owner/repo 123 --input review.md\n"
         ),
@@ -207,21 +225,18 @@ def main(argv: list[str] | None = None) -> int:
         supported_commands = ", ".join(sorted(COMMAND_TO_SCRIPT))
         print(f"Unknown command. Supported commands: {supported_commands}.", file=sys.stderr)
         return 2
+    if not normalize_output_args(args):
+        return 2
     if args.command in HIGH_LEVEL_COMMANDS and args.args and args.args[0] in {"-h", "--help"}:
         print(alias_help(args.command), end="")
         return 0
-    if not normalize_machine_args(args):
-        return 2
-    if args.machine and args.command not in HIGH_LEVEL_COMMANDS:
-        print("--machine is only supported for review, threads, findings, and adapter.", file=sys.stderr)
-        return 2
-    if args.machine and len(args.args) < 2:
+    if args.command in HIGH_LEVEL_COMMANDS and len(args.args) < 2:
         print("High-level commands require <owner/repo> <pr_number>.", file=sys.stderr)
         return 2
     target = SCRIPT_DIR / COMMAND_TO_SCRIPT[args.command]
     rewritten_args = rewrite_alias_args(args.command, args.args)
     result = subprocess.run([sys.executable, str(target), *rewritten_args], text=True, capture_output=True)
-    if args.machine:
+    if args.command in HIGH_LEVEL_COMMANDS and not args.human:
         summary = build_machine_summary(args.command, args.args[0], args.args[1], result)
         sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     else:

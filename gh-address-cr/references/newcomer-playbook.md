@@ -13,6 +13,7 @@ When an AI agent reads this playbook, follow this order:
 5. Then hand the JSON to `gh-address-cr` through the appropriate entrypoint.
 
 `review` is the default orchestrator, but it still needs findings input from one of those paths.
+High-level entrypoints emit machine-readable JSON summaries by default. Use `--human` when a person needs narrative text. `--machine` remains a compatibility alias.
 
 ## What Each Tool Owns
 
@@ -86,7 +87,7 @@ Use `--input -` with `stdin` when findings are being produced in the current ste
 
 Use `--sync` when you want missing local findings from the same source to be auto-closed on refresh.
 
-Use `--machine` when an AI agent needs a stable JSON summary instead of human-oriented text.
+High-level entrypoints emit a machine-readable JSON summary by default. Use `--human` when you need human-oriented text.
 
 If the upstream review output is Markdown review blocks, convert it first with:
 
@@ -112,24 +113,27 @@ Examples:
 
 ```text
 $gh-address-cr review <PR_URL>
-$gh-address-cr review <PR_URL> --machine
+$gh-address-cr review <PR_URL> --human
 $gh-address-cr threads <PR_URL>
-$gh-address-cr threads <PR_URL> --machine
-$gh-address-cr findings <PR_URL> --input findings.json --machine
-$gh-address-cr findings <PR_URL> --input - --sync --machine
-$gh-address-cr adapter <PR_URL> <adapter_cmd...> --machine
+$gh-address-cr findings <PR_URL> --input findings.json
+$gh-address-cr findings <PR_URL> --input - --sync
+$gh-address-cr adapter <PR_URL> <adapter_cmd...>
 ```
 
 Quick read:
 
 - `review`
   - default for full PR review
+  - emits a machine-readable JSON summary by default
 - `threads`
   - GitHub threads only
+  - emits a machine-readable JSON summary by default
 - `findings`
   - existing JSON findings
+  - emits a machine-readable JSON summary by default
 - `adapter`
   - adapter command prints findings JSON
+  - emits a machine-readable JSON summary by default
 
 Practical examples:
 
