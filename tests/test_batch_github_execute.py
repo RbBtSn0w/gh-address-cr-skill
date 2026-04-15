@@ -238,6 +238,46 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         self.assertEqual(payload["github-thread:THREAD_3"]["reply_url"], "https://example.test/reply")
         self.assertIn("submit pending reviews failed", payload["github-thread:THREAD_3"]["error"])
 
+    def test_batch_github_execute_returns_nonzero_when_item_result_is_incomplete(self):
+        module = self.load_module()
+        action_payload = json.dumps(
+            [
+                {
+                    "item_id": "github-thread:THREAD_6",
+                    "thread_id": "THREAD_6",
+                    "reply_body": "Reply body",
+                    "resolve": True,
+                }
+            ]
+        )
+
+        module.list_pending_review_ids = lambda *_args, **_kwargs: set()
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {"status": "skipped", "submitted": [], "error": None}
+        module.github_viewer_login = lambda: "tester"
+        module.audit_event = lambda *args, **kwargs: None
+        module.gh_write_cmd = lambda cmd, *, input_text=None, check=False: subprocess.CompletedProcess(
+            cmd,
+            0,
+            json.dumps({"data": {"reply0": {"comment": {}}}}),
+            "",
+        )
+
+        with patched_argv(
+            [
+                "batch_github_execute.py",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+            ]
+        ), patched_stdin(action_payload):
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                rc = module.main()
+                payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(payload["github-thread:THREAD_6"]["status"], "unknown")
+
     def test_batch_github_execute_scans_pending_reviews_once(self):
         module = self.load_module()
         action_payload = json.dumps(

@@ -22,19 +22,51 @@ def parse_records(raw: str) -> list[dict]:
     if not payload:
         return []
     if payload.startswith("["):
-        data = json.loads(payload)
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            lines = [line for line in payload.splitlines() if line.strip()]
+            if len(lines) > 1:
+                records = []
+                for line_number, line in enumerate(lines, start=1):
+                    try:
+                        records.append(json.loads(line))
+                    except json.JSONDecodeError as line_exc:
+                        raise SystemExit(f"Invalid NDJSON input on line {line_number}: {line_exc}") from line_exc
+                return records
+            raise SystemExit(f"Invalid JSON array input: {exc}") from exc
         if not isinstance(data, list):
             raise SystemExit("Expected a JSON array.")
         return data
     if payload.startswith("{"):
-        data = json.loads(payload)
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            lines = [line for line in payload.splitlines() if line.strip()]
+            if len(lines) > 1:
+                records = []
+                for line_number, line in enumerate(lines, start=1):
+                    try:
+                        records.append(json.loads(line))
+                    except json.JSONDecodeError as line_exc:
+                        raise SystemExit(f"Invalid NDJSON input on line {line_number}: {line_exc}") from line_exc
+                return records
+            raise SystemExit(f"Invalid JSON object input: {exc}") from exc
         if not isinstance(data, dict):
             raise SystemExit("Expected a JSON object.")
         for key in ("findings", "issues", "results"):
             if isinstance(data.get(key), list):
                 return data[key]
         return [data]
-    return [json.loads(line) for line in payload.splitlines() if line.strip()]
+    records = []
+    for line_number, line in enumerate(payload.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"Invalid NDJSON input on line {line_number}: {exc}") from exc
+    return records
 
 
 def normalize_finding(record: dict) -> dict:

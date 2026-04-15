@@ -88,6 +88,15 @@ def main() -> int:
         except json.JSONDecodeError:
             payload["status"] = "failed"
             payload["error"] = "resolve response was not valid JSON"
+            audit_event(
+                "resolve_thread",
+                "failed",
+                args.repo,
+                args.pr_number,
+                args.audit_id,
+                "Resolve response was not valid JSON",
+                {"thread_id": args.thread_id, "error": payload["error"]},
+            )
             return emit_result(payload, 1, error_message=payload["error"])
         resolved = resolve_payload.get("data", {}).get("resolveReviewThread", {}).get("thread", {}).get("isResolved", False)
         payload["remote_status"] = "succeeded"

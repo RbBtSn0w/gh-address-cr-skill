@@ -86,13 +86,14 @@ def main() -> int:
         return 1
 
     reply_body = reply_file.read_text(encoding="utf-8")
+    can_audit = bool(args.repo and args.pr_number)
 
     if args.dry_run:
         print(f"[dry-run] Would reply to thread: {args.thread_id}")
         print("-----")
         print(reply_body.rstrip())
         print("-----")
-        if args.repo and args.pr_number:
+        if can_audit:
             audit_event(
                 "post_reply",
                 "dry-run",
@@ -127,15 +128,16 @@ def main() -> int:
         if result.returncode != 0:
             payload["status"] = "retryable" if is_transient_gh_failure(result.stderr, result.stdout, result.returncode) else "failed"
             payload["error"] = result.stderr or "reply failed"
-            audit_event(
-                "post_reply",
-                "failed",
-                args.repo,
-                args.pr_number,
-                args.audit_id,
-                "Failed to post thread reply",
-                {"thread_id": args.thread_id, "reply_file": str(reply_file), "error": payload["error"]},
-            )
+            if can_audit:
+                audit_event(
+                    "post_reply",
+                    "failed",
+                    args.repo,
+                    args.pr_number,
+                    args.audit_id,
+                    "Failed to post thread reply",
+                    {"thread_id": args.thread_id, "reply_file": str(reply_file), "error": payload["error"]},
+                )
             return emit_result(payload, 1, error_message=payload["error"])
 
         try:
@@ -143,11 +145,31 @@ def main() -> int:
         except json.JSONDecodeError:
             payload["status"] = "failed"
             payload["error"] = "reply response was not valid JSON"
+            if can_audit:
+                audit_event(
+                    "post_reply",
+                    "failed",
+                    args.repo,
+                    args.pr_number,
+                    args.audit_id,
+                    "Reply response was not valid JSON",
+                    {"thread_id": args.thread_id, "reply_file": str(reply_file), "error": payload["error"]},
+                )
             return emit_result(payload, 1, error_message=payload["error"])
         reply_url = reply_payload.get("data", {}).get("addPullRequestReviewThreadReply", {}).get("comment", {}).get("url", "")
         if not reply_url:
             payload["status"] = "unknown"
             payload["error"] = "reply succeeded with no comment url in response"
+            if can_audit:
+                audit_event(
+                    "post_reply",
+                    "partial",
+                    args.repo,
+                    args.pr_number,
+                    args.audit_id,
+                    "Reply succeeded with no comment url in response",
+                    {"thread_id": args.thread_id, "reply_file": str(reply_file), "error": payload["error"]},
+                )
             return emit_result(payload, 1, error_message=payload["error"])
 
         payload["reply_status"] = "succeeded"
@@ -163,54 +185,57 @@ def main() -> int:
 
         if payload["review_submit_status"] in {"skipped", "succeeded"}:
             payload["status"] = "succeeded"
+            if can_audit:
+                audit_event(
+                    "post_reply",
+                    "ok",
+                    args.repo,
+                    args.pr_number,
+                    args.audit_id,
+                    "Posted thread reply",
+                    {
+                        "thread_id": args.thread_id,
+                        "reply_file": str(reply_file),
+                        "reply_url": reply_url,
+                        "pending_reviews_after": sorted(pending_after),
+                        "submitted_pending_reviews": submit_result["submitted"],
+                    },
+                )
+            return emit_result(payload, 0)
+
+        payload["status"] = "unknown"
+        payload["error"] = submit_result["error"] or "reply posted but review submission did not complete"
+        if can_audit:
             audit_event(
                 "post_reply",
-                "ok",
+                "partial",
                 args.repo,
                 args.pr_number,
                 args.audit_id,
-                "Posted thread reply",
+                "Posted thread reply but review submission did not complete",
                 {
                     "thread_id": args.thread_id,
                     "reply_file": str(reply_file),
                     "reply_url": reply_url,
                     "pending_reviews_after": sorted(pending_after),
                     "submitted_pending_reviews": submit_result["submitted"],
+                    "error": payload["error"],
                 },
             )
-            return emit_result(payload, 0)
-
-        payload["status"] = "unknown"
-        payload["error"] = submit_result["error"] or "reply posted but review submission did not complete"
-        audit_event(
-            "post_reply",
-            "partial",
-            args.repo,
-            args.pr_number,
-            args.audit_id,
-            "Posted thread reply but review submission did not complete",
-            {
-                "thread_id": args.thread_id,
-                "reply_file": str(reply_file),
-                "reply_url": reply_url,
-                "pending_reviews_after": sorted(pending_after),
-                "submitted_pending_reviews": submit_result["submitted"],
-                "error": payload["error"],
-            },
-        )
         return emit_result(payload, 1, error_message=payload["error"])
     except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
         payload["status"] = "unknown" if payload["reply_status"] == "succeeded" else "failed"
         payload["error"] = (getattr(exc, "stderr", "") or getattr(exc, "stdout", "") or str(exc)).strip()
-        audit_event(
-            "post_reply",
-            "partial" if payload["reply_status"] == "succeeded" else "failed",
-            args.repo,
-            args.pr_number,
-            args.audit_id,
-            "Post reply command failed",
-            {"thread_id": args.thread_id, "reply_file": str(reply_file), "error": payload["error"]},
-        )
+        if can_audit:
+            audit_event(
+                "post_reply",
+                "partial" if payload["reply_status"] == "succeeded" else "failed",
+                args.repo,
+                args.pr_number,
+                args.audit_id,
+                "Post reply command failed",
+                {"thread_id": args.thread_id, "reply_file": str(reply_file), "error": payload["error"]},
+            )
         return emit_result(payload, 1, error_message=payload["error"])
 
 

@@ -34,6 +34,34 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         )
         self.assertEqual(module.unresolved_ids_from_snapshot_text(snapshot_text), ["THREAD_1", "THREAD_3"])
 
+    def test_ingest_findings_reports_invalid_json_array(self):
+        ingest_spec = importlib.util.spec_from_file_location("ingest_findings_module", PYTHON_COMMON_PY.parent / "ingest_findings.py")
+        self.assertIsNotNone(ingest_spec)
+        ingest_module = importlib.util.module_from_spec(ingest_spec)
+        sys.path.insert(0, str(PYTHON_COMMON_PY.parent))
+        try:
+            ingest_spec.loader.exec_module(ingest_module)
+        finally:
+            sys.path.pop(0)
+
+        with self.assertRaises(SystemExit) as ctx:
+            ingest_module.parse_records('[{"title": "oops"')
+        self.assertIn("Invalid JSON array input", str(ctx.exception))
+
+    def test_ingest_findings_reports_invalid_ndjson_line(self):
+        ingest_spec = importlib.util.spec_from_file_location("ingest_findings_module", PYTHON_COMMON_PY.parent / "ingest_findings.py")
+        self.assertIsNotNone(ingest_spec)
+        ingest_module = importlib.util.module_from_spec(ingest_spec)
+        sys.path.insert(0, str(PYTHON_COMMON_PY.parent))
+        try:
+            ingest_spec.loader.exec_module(ingest_module)
+        finally:
+            sys.path.pop(0)
+
+        with self.assertRaises(SystemExit) as ctx:
+            ingest_module.parse_records('{"title": "ok"}\nnot-json\n')
+        self.assertIn("Invalid NDJSON input on line 2", str(ctx.exception))
+
     def test_generate_reply_fix_mode_writes_markdown(self):
         output = Path(self.temp_dir.name) / "reply.md"
         result = self.run_cmd(

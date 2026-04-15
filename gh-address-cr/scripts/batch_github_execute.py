@@ -141,6 +141,8 @@ def main() -> int:
                 results[item_id] = item_result(status="retryable", error=result.stderr or "GraphQL request failed", reply_url=reply_url, resolved=resolved)
             else:
                 results[item_id] = item_result(status="unknown", error=result.stderr or "GraphQL response was incomplete", reply_url=reply_url, resolved=resolved)
+            if results[item_id]["status"] != "succeeded":
+                had_error = True
 
     pending_after = list_pending_review_ids(args.repo, args.pr_number, login)
     current_pending = sorted(pending_after)

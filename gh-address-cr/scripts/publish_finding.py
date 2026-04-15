@@ -202,6 +202,15 @@ def main() -> int:
     except json.JSONDecodeError:
         payload["status"] = "failed"
         payload["error"] = "publish response was not valid JSON"
+        audit_event(
+            "publish_finding",
+            "failed",
+            args.repo,
+            args.pr,
+            args.audit_id,
+            "Publish response was not valid JSON",
+            {"item_id": args.local_item_id, "error": payload["error"]},
+        )
         return emit_result(payload, 1, error_message=payload["error"])
     payload["remote_status"] = "succeeded"
     payload["comment_id"] = comment.get("id")
