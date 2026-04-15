@@ -72,6 +72,22 @@ def findings_file(repo: str, pr_number: str, name: str = "code-review-findings.j
     return workspace_dir(repo, pr_number) / name
 
 
+def producer_request_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "producer-request.md"
+
+
+def incoming_findings_json_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "incoming-findings.json"
+
+
+def incoming_findings_markdown_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "incoming-findings.md"
+
+
+def normalized_handoff_findings_file(repo: str, pr_number: str) -> Path:
+    return findings_file(repo, pr_number, "incoming-findings.normalized.json")
+
+
 def reply_file(repo: str, pr_number: str, name: str) -> Path:
     return workspace_dir(repo, pr_number) / name
 

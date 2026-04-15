@@ -7,7 +7,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from python_common import normalize_repo, state_dir
+from ingest_findings import normalize_finding, parse_records
+from review_to_findings import parse_findings
+from python_common import incoming_findings_json_file, incoming_findings_markdown_file, normalized_handoff_findings_file
+from python_common import producer_request_file, workspace_dir
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -40,7 +43,8 @@ COMMAND_TO_SCRIPT = {
 HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter"}
 OUTPUT_FLAGS = {"--machine", "--human"}
 HIGH_LEVEL_GH_COMMANDS = {"review", "threads", "adapter"}
-INPUT_REQUIRED_COMMANDS = {"review", "findings"}
+INPUT_REQUIRED_COMMANDS = {"findings"}
+WAITING_FOR_EXTERNAL_REVIEW_EXIT = 6
 
 
 def inline_output_flags(command: str, passthrough_args: list[str]) -> set[str]:
@@ -71,7 +75,7 @@ def normalize_output_args(args: argparse.Namespace) -> bool:
 
 def rewrite_alias_args(command: str, passthrough_args: list[str]) -> list[str]:
     if command == "review":
-        return ["mixed", "code-review", *passthrough_args]
+        return ["mixed", "json", *passthrough_args]
     if command == "threads":
         return ["remote", *passthrough_args]
     if command == "findings":
@@ -86,12 +90,12 @@ def rewrite_alias_args(command: str, passthrough_args: list[str]) -> list[str]:
 def alias_help(command: str) -> str:
     if command == "review":
         return (
-            "usage: cli.py review <owner/repo> <pr_number> --input <path>|- [--human|--machine]\n\n"
+            "usage: cli.py review <owner/repo> <pr_number> [--input <path>|-] [--human|--machine]\n\n"
             "High-level PR review entrypoint.\n\n"
             "Use when you want the full PR review workflow to run automatically.\n"
-            "This command does not generate findings; it only consumes findings JSON and orchestrates session/gate handling.\n"
-            "Provide findings JSON via --input <path> or --input - with stdin.\n"
-            "Missing --input fails immediately instead of waiting on stdin.\n"
+            "This command waits for external review findings when they are absent,\n"
+            "then tells you to re-run the same review command once handoff artifacts are filled.\n"
+            "You may still provide findings JSON explicitly via --input <path> or --input -.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
             "--machine remains a compatibility alias for the default machine summary.\n"
         )
@@ -127,7 +131,75 @@ def alias_help(command: str) -> str:
 
 
 def workspace_root(repo: str, pr_number: str) -> Path:
-    return state_dir() / normalize_repo(repo) / f"pr-{pr_number}"
+    return workspace_dir(repo, pr_number)
+
+
+def external_review_command(repo: str, pr_number: str) -> str:
+    return f"python3 gh-address-cr/scripts/cli.py review {repo} {pr_number}"
+
+
+def _write_if_missing(path: Path, content: str = "") -> None:
+    if not path.exists():
+        path.write_text(content, encoding="utf-8")
+
+
+def ensure_external_review_handoff(repo: str, pr_number: str) -> Path:
+    workspace = workspace_root(repo, pr_number)
+    workspace.mkdir(parents=True, exist_ok=True)
+    request_path = producer_request_file(repo, pr_number)
+    incoming_json = incoming_findings_json_file(repo, pr_number)
+    incoming_md = incoming_findings_markdown_file(repo, pr_number)
+    request_path.write_text(
+        (
+            f"# External Review Producer Handoff\n\n"
+            f"Use any external review producer to review `{repo}` PR `{pr_number}`.\n\n"
+            f"Accepted handoff formats:\n\n"
+            f"1. Preferred: write findings JSON to `{incoming_json}`\n"
+            f"2. Fallback: write fixed `finding` blocks to `{incoming_md}`\n\n"
+            f"Required finding fields:\n\n"
+            f"- `title`\n"
+            f"- `body`\n"
+            f"- `path`\n"
+            f"- `line`\n\n"
+            f"Do not write a Markdown-only narrative review report.\n"
+            f"After writing one of the accepted handoff files, rerun:\n\n"
+            f"```bash\n{external_review_command(repo, pr_number)}\n```\n"
+        ),
+        encoding="utf-8",
+    )
+    _write_if_missing(incoming_json)
+    _write_if_missing(incoming_md)
+    return request_path
+
+
+def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str | None]:
+    incoming_json = incoming_findings_json_file(repo, pr_number)
+    incoming_md = incoming_findings_markdown_file(repo, pr_number)
+    raw_json = incoming_json.read_text(encoding="utf-8") if incoming_json.exists() else ""
+    raw_md = incoming_md.read_text(encoding="utf-8") if incoming_md.exists() else ""
+    findings: list[dict] | None = None
+
+    if raw_json.strip():
+        try:
+            findings = [normalize_finding(record) for record in parse_records(raw_json)]
+        except SystemExit as exc:
+            return None, str(exc) or "Invalid findings JSON."
+        except Exception as exc:
+            return None, str(exc) or "Invalid findings JSON."
+    elif raw_md.strip():
+        try:
+            findings = parse_findings(raw_md)
+        except SystemExit as exc:
+            return None, str(exc) or "Invalid finding blocks."
+        except Exception as exc:
+            return None, str(exc) or "Invalid finding blocks."
+
+    if findings is None:
+        return None, None
+
+    normalized_path = normalized_handoff_findings_file(repo, pr_number)
+    normalized_path.write_text(json.dumps(findings, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return str(normalized_path), None
 
 
 def load_session_payload(repo: str, pr_number: str) -> dict:
@@ -243,13 +315,15 @@ def build_preflight_summary(
     repo: str,
     pr_number: str,
     *,
+    status: str = "FAILED",
     exit_code: int,
     reason_code: str,
     waiting_on: str | None,
     next_action: str,
+    artifact_path: str | None = None,
 ) -> dict:
     return {
-        "status": "FAILED",
+        "status": status,
         "repo": repo,
         "pr_number": pr_number,
         "item_id": None,
@@ -260,7 +334,7 @@ def build_preflight_summary(
             "unresolved_github_threads_count": 0,
             "needs_human_items_count": 0,
         },
-        "artifact_path": str(workspace_root(repo, pr_number)),
+        "artifact_path": artifact_path or str(workspace_root(repo, pr_number)),
         "reason_code": reason_code,
         "waiting_on": waiting_on,
         "next_action": next_action,
@@ -272,16 +346,30 @@ def has_option(args: list[str], flag: str) -> bool:
     return flag in args
 
 
-def output_preflight_error(args: argparse.Namespace, repo: str, pr_number: str, message: str, *, reason_code: str, waiting_on: str | None, next_action: str, exit_code: int = 2) -> int:
+def output_preflight_error(
+    args: argparse.Namespace,
+    repo: str,
+    pr_number: str,
+    message: str,
+    *,
+    status: str = "FAILED",
+    reason_code: str,
+    waiting_on: str | None,
+    next_action: str,
+    artifact_path: str | None = None,
+    exit_code: int = 2,
+) -> int:
     if not args.human:
         summary = build_preflight_summary(
             args.command,
             repo,
             pr_number,
+            status=status,
             exit_code=exit_code,
             reason_code=reason_code,
             waiting_on=waiting_on,
             next_action=next_action,
+            artifact_path=artifact_path,
         )
         sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     print(message, file=sys.stderr)
@@ -291,17 +379,6 @@ def output_preflight_error(args: argparse.Namespace, repo: str, pr_number: str, 
 def preflight_high_level(args: argparse.Namespace) -> int | None:
     repo = args.args[0]
     pr_number = args.args[1]
-
-    if args.command in INPUT_REQUIRED_COMMANDS and not has_option(args.args, "--input"):
-        return output_preflight_error(
-            args,
-            repo,
-            pr_number,
-            f"{args.command} requires findings JSON. This command does not generate findings. Pass --input <path> or --input - and provide findings through stdin.",
-            reason_code="MISSING_FINDINGS_INPUT",
-            waiting_on="findings_input",
-            next_action=f"`{args.command}` does not generate findings. Provide findings JSON with `python3 gh-address-cr/scripts/cli.py {args.command} {repo} {pr_number} --input <path>|-`.",
-        )
 
     if args.command == "adapter" and len(args.args) < 3:
         return output_preflight_error(
@@ -323,6 +400,55 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
             reason_code="MISSING_GH_CLI",
             waiting_on="github_cli",
             next_action="Install GitHub CLI and ensure `gh` is available on PATH, then rerun the command.",
+        )
+
+    if args.command == "review" and not has_option(args.args, "--input"):
+        normalized_input, error = normalize_review_handoff(repo, pr_number)
+        if error:
+            return output_preflight_error(
+                args,
+                repo,
+                pr_number,
+                f"Invalid external review producer output: {error} Use findings JSON or fixed `finding` blocks.",
+                reason_code="INVALID_PRODUCER_OUTPUT",
+                waiting_on="external_review_output",
+                next_action=(
+                    "Write valid findings JSON to `incoming-findings.json` or fixed `finding` blocks "
+                    "to `incoming-findings.md`, then rerun the same review command."
+                ),
+            )
+        if normalized_input:
+            args.args = [*args.args, "--input", normalized_input]
+            return None
+        request_path = ensure_external_review_handoff(repo, pr_number)
+        return output_preflight_error(
+            args,
+            repo,
+            pr_number,
+            (
+                "No external review findings are available yet from an external review producer. "
+                f"Write findings JSON or fixed `finding` blocks using {request_path}, then rerun the same review command."
+            ),
+            status="WAITING_FOR_EXTERNAL_REVIEW",
+            reason_code="WAITING_FOR_EXTERNAL_REVIEW",
+            waiting_on="external_review",
+            next_action=(
+                "Provide findings JSON in `incoming-findings.json` or fixed `finding` blocks "
+                "in `incoming-findings.md`, then rerun the same review command."
+            ),
+            artifact_path=str(request_path),
+            exit_code=WAITING_FOR_EXTERNAL_REVIEW_EXIT,
+        )
+
+    if args.command in INPUT_REQUIRED_COMMANDS and not has_option(args.args, "--input"):
+        return output_preflight_error(
+            args,
+            repo,
+            pr_number,
+            f"{args.command} requires findings JSON. This command does not generate findings. Pass --input <path> or --input - and provide findings through stdin.",
+            reason_code="MISSING_FINDINGS_INPUT",
+            waiting_on="findings_input",
+            next_action=f"`{args.command}` does not generate findings. Provide findings JSON with `python3 gh-address-cr/scripts/cli.py {args.command} {repo} {pr_number} --input <path>|-`.",
         )
     return None
 
@@ -347,12 +473,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="{review,threads,findings,adapter,review-to-findings}",
         help=(
             "High-level commands:\n"
-            "  cli.py review owner/repo 123 --input - [--human]\n"
+            "  cli.py review owner/repo 123 [--human]\n"
             "  cli.py threads owner/repo 123 [--human]\n"
             "  cli.py findings owner/repo 123 --input findings.json [--human]\n"
             "  cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py\n"
             "Notes:\n"
-            "  review consumes findings JSON; it does not generate findings.\n"
+            "  review waits for external review findings when they are absent.\n"
             "  High-level commands are the agent-safe public surface.\n"
             "  For `adapter`, flags after <adapter_cmd...> are passed through to the adapter command.\n"
             "Utility commands:\n"

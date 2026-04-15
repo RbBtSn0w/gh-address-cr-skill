@@ -42,7 +42,8 @@ class PythonWrapperCLITest(PythonScriptTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("usage: cli.py review", result.stdout)
         self.assertIn("High-level PR review entrypoint.", result.stdout)
-        self.assertIn("does not generate findings", result.stdout)
+        self.assertIn("waits for external review findings", result.stdout)
+        self.assertIn("re-run the same review command", result.stdout)
         self.assertIn("Default output is a structured JSON summary.", result.stdout)
         self.assertIn("--human", result.stdout)
         self.assertIn("--machine", result.stdout)
@@ -214,18 +215,122 @@ else:
         self.assertEqual(summary["reason_code"], "PASSED")
         self.assertIsNone(summary["waiting_on"])
 
-    def test_cli_review_alias_requires_findings_input(self):
+    def test_cli_review_without_findings_enters_external_review_wait_state(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        gh.chmod(0o755)
+
         result = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 6)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "WAITING_FOR_EXTERNAL_REVIEW")
+        self.assertEqual(summary["reason_code"], "WAITING_FOR_EXTERNAL_REVIEW")
+        self.assertEqual(summary["waiting_on"], "external_review")
+        self.assertIn("rerun the same review command", summary["next_action"])
+        self.assertEqual(summary["repo"], self.repo)
+        request_path = Path(summary["artifact_path"])
+        self.assertTrue(request_path.exists())
+        self.assertEqual(request_path.name, "producer-request.md")
+        self.assertTrue((self.workspace_dir() / "incoming-findings.json").exists())
+        self.assertTrue((self.workspace_dir() / "incoming-findings.md").exists())
+        self.assertIn("external review producer", result.stderr)
+
+    def test_cli_review_auto_ingests_handoff_json_without_explicit_input(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        (self.workspace_dir() / "incoming-findings.json").write_text("[]\n", encoding="utf-8")
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "PASSED")
+        self.assertEqual(summary["reason_code"], "PASSED")
+        self.assertIsNone(summary["waiting_on"])
+
+    def test_cli_review_auto_converts_handoff_finding_blocks(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        (self.workspace_dir() / "incoming-findings.md").write_text(
+            """```finding
+title: Missing null guard
+path: src/example.py
+line: 12
+body: Potential null dereference.
+```
+""",
+            encoding="utf-8",
+        )
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
+        self.assertEqual(result.returncode, 5, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "BLOCKED")
+        self.assertEqual(summary["reason_code"], "WAITING_FOR_FIX")
+        self.assertEqual(summary["item_kind"], "local_finding")
+
+    def test_cli_review_rejects_invalid_handoff_markdown(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        gh.chmod(0o755)
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        (self.workspace_dir() / "incoming-findings.md").write_text("# narrative review only\n", encoding="utf-8")
+
+        result = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
+        self.assertEqual(result.returncode, 2)
         summary = json.loads(result.stdout)
         self.assertEqual(summary["status"], "FAILED")
-        self.assertEqual(summary["reason_code"], "MISSING_FINDINGS_INPUT")
-        self.assertEqual(summary["waiting_on"], "findings_input")
-        self.assertIn("--input", summary["next_action"])
-        self.assertIn("does not generate findings", summary["next_action"])
-        self.assertEqual(summary["repo"], self.repo)
-        self.assertIn("findings JSON", result.stderr)
-        self.assertIn("does not generate findings", result.stderr)
+        self.assertEqual(summary["reason_code"], "INVALID_PRODUCER_OUTPUT")
+        self.assertEqual(summary["waiting_on"], "external_review_output")
+        self.assertIn("fixed `finding` blocks", summary["next_action"])
+        self.assertIn("fixed `finding` blocks", result.stderr)
 
     def test_cli_findings_machine_reports_pause_summary(self):
         payload_file = Path(self.temp_dir.name) / "findings.json"

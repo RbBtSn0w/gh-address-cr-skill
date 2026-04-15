@@ -11,7 +11,7 @@ Use this skill as the PR review orchestrator. It owns session state, intake rout
 ## Usage
 
 ```text
-/gh-address-cr review <owner/repo> <pr_number> --input <path>|-
+/gh-address-cr review <owner/repo> <pr_number>
 /gh-address-cr threads <owner/repo> <pr_number>
 /gh-address-cr findings <owner/repo> <pr_number> --input <path>|-
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
@@ -21,50 +21,51 @@ Use this skill as the PR review orchestrator. It owns session state, intake rout
 
 Read this skill in this order when you are an AI agent:
 
-1. If you already have findings JSON, use `findings --input <path>|-`.
-2. If you have fixed-format review blocks, convert them with `review-to-findings`, then use `findings`.
-3. If you only need GitHub review threads, use `threads`.
-4. If you want the full PR orchestration flow and already have findings JSON, use `review --input <path>|-`.
-5. If your upstream producer is an adapter command, use `adapter <owner/repo> <pr_number> <adapter_cmd...>`.
+1. Start from the public main entrypoint: `review <owner/repo> <pr_number>`.
+2. If `review` returns `WAITING_FOR_EXTERNAL_REVIEW`, fill the handoff files in the PR workspace:
+   - `producer-request.md`
+   - `incoming-findings.json`
+   - `incoming-findings.md`
+3. Rerun the same `review` command. It will auto-consume findings JSON or fixed `finding` blocks and continue orchestration.
+4. Use `threads`, `findings`, `adapter`, and `review-to-findings` only as advanced/internal integration surfaces.
 
 Fail-fast rules:
 
-- `review` and `findings` require explicit findings input.
-- `review` does not generate findings; it only consumes findings JSON and orchestrates session/gate handling.
-- If `--input` is missing, the CLI fails immediately instead of waiting on `stdin`.
+- `review` is the only public main entrypoint.
+- `review` does not bind to any one review skill or tool name.
+- If findings are absent, `review` returns `WAITING_FOR_EXTERNAL_REVIEW` and writes a standard producer handoff request instead of waiting on `stdin`.
+- External review producer output must be findings JSON or fixed `finding` blocks.
 - `review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format.
 - `review`, `threads`, and `adapter` require `gh` on `PATH` and fail immediately when it is missing.
 - The high-level CLI commands are the only agent-safe public surface. Treat low-level scripts as internal implementation details.
 
 Important:
 
-- `review` is the default end-to-end orchestrator, not a hidden review producer.
-- `threads` handles GitHub threads only.
-- `findings` handles existing findings JSON only.
-- `adapter` runs an adapter command that prints findings JSON and then orchestrates the PR session, including GitHub thread handling.
+- `review` is the default end-to-end orchestrator and the public main entrypoint.
+- `review` manages session state, external review handoff, GitHub threads, and final-gate.
+- `threads`, `findings`, `adapter`, and `review-to-findings` are advanced/internal entrypoints for explicit integrations.
 - `review-to-findings` is only a converter. It is not a review engine and it is not a general Markdown parser.
 
 Recommended high-level entrypoints:
 
 - `review`
-  - default entrypoint
-  - runs the full PR review workflow automatically once findings are supplied
+  - public main entrypoint
+  - generates a standard producer handoff when findings are absent
   - handles both local findings and GitHub review threads in one run
 - `threads`
-  - GitHub review threads only
+  - advanced/internal: GitHub review threads only
 - `findings`
-  - existing findings JSON only
+  - advanced/internal: existing findings JSON only
   - handles local findings only; it does not process GitHub review threads
 - `adapter`
-  - adapter-produced findings plus PR orchestration
+  - advanced/internal: adapter-produced findings plus PR orchestration
 - `review-to-findings`
-  - fixed-format finding blocks to findings JSON
+  - advanced/internal: fixed-format finding blocks to findings JSON
 
 Examples:
 
 ```text
-$gh-address-cr review <PR_URL> --input findings.json
-$gh-address-cr review <PR_URL> --input -
+$gh-address-cr review <PR_URL>
 $gh-address-cr threads <PR_URL>
 $gh-address-cr findings <PR_URL> --input findings.json
 $gh-address-cr findings <PR_URL> --input - --sync
@@ -108,6 +109,7 @@ High-level commands emit structured JSON by default. Agents should consume these
 - Dispatch details: `references/mode-producer-matrix.md`
 - Review triage checklist: `references/cr-triage-checklist.md`
 - Low-level scripts are implementation details, not the public agent surface.
+- Human-readable prompt and handoff examples live in `README.md`.
 
 Examples that require advanced dispatch details live in the reference docs instead of the first-read contract.
 
@@ -116,7 +118,7 @@ Examples that require advanced dispatch details live in the reference docs inste
 Treat `SKILL.md` as the source of truth for using this skill.
 
 - Start from the high-level dispatcher:
-  - `python3 scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-]`
+  - `python3 scripts/cli.py review <owner/repo> <pr_number>`
   - `python3 scripts/cli.py threads <owner/repo> <pr_number>`
   - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|- [--sync]`
   - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>`
@@ -152,7 +154,7 @@ Advanced producer and dispatch details live in:
 ## Core Rules
 
 1. Use the high-level task entrypoints first:
-  - `python3 scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-]`
+  - `python3 scripts/cli.py review <owner/repo> <pr_number>`
   - `python3 scripts/cli.py threads <owner/repo> <pr_number>`
   - `python3 scripts/cli.py findings <owner/repo> <pr_number> --input <path>|-`
   - `python3 scripts/cli.py adapter <owner/repo> <pr_number> <adapter_cmd...>`

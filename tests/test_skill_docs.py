@@ -8,12 +8,12 @@ README_MD = ROOT / "README.md"
 
 
 class SkillDocumentationContractTest(unittest.TestCase):
-    def test_skill_examples_do_not_show_bare_review_entrypoint(self):
+    def test_skill_examples_use_review_as_main_entrypoint_without_required_input(self):
         text = SKILL_MD.read_text(encoding="utf-8")
-        self.assertNotIn("$gh-address-cr review <PR_URL>\n", text)
-        self.assertIn("/gh-address-cr review <owner/repo> <pr_number> --input <path>|-", text)
-        self.assertIn("$gh-address-cr review <PR_URL> --input findings.json", text)
-        self.assertIn("$gh-address-cr review <PR_URL> --input -", text)
+        self.assertIn("/gh-address-cr review <owner/repo> <pr_number>", text)
+        self.assertNotIn("/gh-address-cr review <owner/repo> <pr_number> --input <path>|-", text)
+        self.assertIn("$gh-address-cr review <PR_URL>", text)
+        self.assertNotIn("$gh-address-cr review <PR_URL> --input findings.json", text)
 
     def test_skill_documents_converter_input_contract(self):
         text = SKILL_MD.read_text(encoding="utf-8")
@@ -42,18 +42,16 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertNotIn("Advanced dispatch model:", text)
         self.assertIn("references/mode-producer-matrix.md", text)
-        self.assertIn("adapter-produced findings plus PR orchestration", text)
-        self.assertIn("handles both local findings and GitHub review threads in one run", text)
-        self.assertIn("handles local findings only; it does not process GitHub review threads", text)
+        self.assertIn("public main entrypoint", text)
+        self.assertIn("advanced/internal", text)
         self.assertNotIn("## Prompt Patterns", text)
         self.assertIn("README.md", text)
 
-    def test_readme_examples_do_not_show_bare_review_entrypoint(self):
+    def test_readme_examples_use_single_review_main_entrypoint(self):
         text = README_MD.read_text(encoding="utf-8")
-        self.assertNotIn("$gh-address-cr review <PR_URL>\n", text)
-        self.assertIn("/gh-address-cr review <owner/repo> <pr_number> --input <path>|-", text)
-        self.assertIn("$gh-address-cr review <PR_URL> --input findings.json", text)
-        self.assertIn("$gh-address-cr review <PR_URL> --input -", text)
+        self.assertIn("/gh-address-cr review <owner/repo> <pr_number>", text)
+        self.assertNotIn("/gh-address-cr review <owner/repo> <pr_number> --input <path>|-", text)
+        self.assertIn("$gh-address-cr review <PR_URL>", text)
 
     def test_readme_matches_adapter_public_semantics(self):
         text = README_MD.read_text(encoding="utf-8")
@@ -94,8 +92,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_readme_keeps_one_canonical_prompt_template_section(self):
         text = README_MD.read_text(encoding="utf-8")
-        self.assertEqual(text.count("When `gh-address-cr` is the main entrypoint:"), 1)
-        self.assertEqual(text.count("When the upstream review command must run first and `gh-address-cr` can only come second:"), 1)
+        self.assertEqual(text.count("使用 $gh-address-cr 完整处理这个 PR：<PR_URL>"), 1)
         self.assertNotIn("## Prompt Templates", text)
 
     def test_readme_documents_executable_adapter_flag_examples(self):
@@ -105,7 +102,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("python3 gh-address-cr/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py", text)
         self.assertIn("python3 gh-address-cr/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py --base main --human", text)
 
-    def test_prompt_patterns_distinguish_review_vs_findings_scope(self):
+    def test_readme_documents_external_review_handoff_contract(self):
         readme_text = README_MD.read_text(encoding="utf-8")
-        self.assertIn("如果你要同时处理 GitHub review threads 和 local findings，请使用 `review` 入口。", readme_text)
-        self.assertIn("如果你只想接管 local findings JSON，请使用 `findings` 入口。", readme_text)
+        self.assertIn("任意外部 review producer", readme_text)
+        self.assertIn("producer-request.md", readme_text)
+        self.assertIn("incoming-findings.json", readme_text)
+        self.assertIn("incoming-findings.md", readme_text)
+        self.assertIn("WAITING_FOR_EXTERNAL_REVIEW", readme_text)

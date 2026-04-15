@@ -20,33 +20,40 @@ For handled GitHub threads, replying and resolving are still two separate requir
 - `adapter`
 - `review-to-findings`
 
-Agent-first reading order:
+Public main entrypoint:
 
-1. If you already have findings JSON, use `findings --input <path>|-`.
-2. Use `--input <path>` only for a real JSON file.
-3. Use `--input -` when findings are produced in the current step.
-4. If the upstream tool only prints fixed `finding` blocks, convert them with `review-to-findings` first.
-5. If you only need GitHub review threads, use `threads`.
-6. If you want full PR orchestration and already have findings JSON, use `review --input <path>|-`.
-7. If your producer is an adapter command, use `adapter <owner/repo> <pr_number> <adapter_cmd...>`.
+- `review`
+
+Advanced/internal entrypoints:
+
+- `threads`
+- `findings`
+- `adapter`
+- `review-to-findings`
 
 Fail-fast contract:
 
-- `review` and `findings` require findings input explicitly.
-- `review` does not generate findings; it only consumes findings JSON and orchestrates session/gate handling.
-- If `--input` is missing, the CLI fails immediately with a structured error instead of waiting on `stdin`.
+- `review` does not bind to any one review skill or tool name.
+- `review` is the public main entrypoint.
+- If findings are absent, `review` returns `WAITING_FOR_EXTERNAL_REVIEW` and writes a standard producer handoff request instead of waiting on `stdin`.
+- External producer output must be findings JSON or fixed `finding` blocks.
+- `findings` still requires explicit findings JSON input.
 - `review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format.
 - `review`, `threads`, and `adapter` also fail immediately when `gh` is missing from `PATH`.
 - For `adapter`, wrapper `--human` and `--machine` belong before `adapter`. Arguments after `<adapter_cmd...>` are passed through to the adapter command unchanged.
 - The high-level CLI commands are the agent-safe public surface. Treat low-level scripts as implementation details.
 
-`review` is the default orchestrator, but it still needs findings input from one of the paths above.
+`review` is the default orchestrator. It either:
+
+- consumes explicit findings input when `--input` is supplied, or
+- generates an external review handoff and waits for a producer-compatible result
+
 High-level entrypoints emit machine-readable JSON summaries by default. Use `--human` when a person needs narrative text. `--machine` remains a compatibility alias.
 
 Recommended invocation model:
 
 ```text
-/gh-address-cr review <owner/repo> <pr_number> --input <path>|-
+/gh-address-cr review <owner/repo> <pr_number>
 /gh-address-cr threads <owner/repo> <pr_number>
 /gh-address-cr findings <owner/repo> <pr_number> --input <path>|-
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
@@ -71,9 +78,7 @@ Stable machine summary fields:
 Examples:
 
 ```text
-$gh-address-cr review <PR_URL> --input findings.json
-$gh-address-cr review <PR_URL> --input -
-$gh-address-cr review <PR_URL> --input findings.json --human
+$gh-address-cr review <PR_URL>
 $gh-address-cr threads <PR_URL>
 $gh-address-cr findings <PR_URL> --input findings.json
 $gh-address-cr findings <PR_URL> --input - --sync
@@ -94,42 +99,61 @@ For `adapter`, the last two examples mean different things:
 High-level entrypoints:
 
 - `review`
-  - default entrypoint
-  - runs the full PR review workflow automatically once findings are supplied
+  - public main entrypoint
+  - runs the full PR review workflow automatically
+  - waits for external producer handoff when findings are absent
   - handles both local findings and GitHub review threads in one run
   - emits a machine-readable JSON summary by default
 - `threads`
-  - GitHub review threads only
+  - advanced/internal: GitHub review threads only
   - emits a machine-readable JSON summary by default
 - `findings`
-  - existing findings JSON only
+  - advanced/internal: existing findings JSON only
   - handles local findings only; it does not process GitHub review threads
   - emits a machine-readable JSON summary by default
 - `adapter`
-  - adapter-produced findings plus PR orchestration, including GitHub thread handling
+  - advanced/internal: adapter-produced findings plus PR orchestration, including GitHub thread handling
   - emits a machine-readable JSON summary by default
 - `review-to-findings`
-  - fixed-format finding blocks to findings JSON
+  - advanced/internal: fixed-format finding blocks to findings JSON
+
+Automatic external review handoff:
+
+- `review` writes `producer-request.md` when findings are absent
+- any external review producer may satisfy the handoff
+- preferred handoff file: `incoming-findings.json`
+- fallback handoff file: `incoming-findings.md`
+- `incoming-findings.md` must contain fixed `finding` blocks
+- rerun the same `review` command after writing one of the handoff files
+- plain narrative Markdown is not accepted
+
+Producer contract:
+
+- `gh-address-cr` does not require a specific skill name
+- it accepts output from any external review producer
+- the producer may be another skill, a command, or another review tool
+- the only required contract is findings JSON or fixed `finding` blocks
+
+Minimal user prompt:
+
+```text
+让 $gh-address-cr 完整处理这个 PR：<PR_URL>
+```
 
 Typical flows:
 
 ```text
-// Run a review producer first, then ingest the JSON
-<review-command> <PR_URL> --output findings.json
-$gh-address-cr findings <PR_URL> --input findings.json --sync
+// Main flow: start the PR session
+$gh-address-cr review <PR_URL>
 
-// Pipe findings directly from the producer
-<review-command> <PR_URL> | $gh-address-cr findings <PR_URL> --input - --sync
+// If findings are absent, `review` returns WAITING_FOR_EXTERNAL_REVIEW
+// and writes:
+// - producer-request.md
+// - incoming-findings.json
+// - incoming-findings.md
 
-// Convert fixed finding blocks first when the producer is not JSON-native
-<review-command> <PR_URL> | $gh-address-cr review-to-findings <owner/repo> <pr_number> > findings.json
-$gh-address-cr findings <PR_URL> --input findings.json --sync
-
-// Full PR workflow with the default review entrypoint
-$gh-address-cr review <PR_URL> --input findings.json
-
-// Switch to human-oriented text when a person is reading the output
-$gh-address-cr review <PR_URL> --input findings.json --human
+// After any external review producer fills a handoff file, rerun the same command
+$gh-address-cr review <PR_URL>
 
 // Adapter wrapper output flag comes before `adapter`
 python3 gh-address-cr/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py
@@ -153,31 +177,13 @@ This converter rejects plain narrative Markdown review output.
 
 Prompt patterns:
 
-When `gh-address-cr` is the main entrypoint:
-
 ```text
-使用 $gh-address-cr 处理这个 PR：<PR_URL>
+使用 $gh-address-cr 完整处理这个 PR：<PR_URL>
 
-如果你要同时处理 GitHub review threads 和 local findings，请使用 `review` 入口。
-如果你只想接管 local findings JSON，请使用 `findings` 入口。
-先让上游 review producer 输出 findings JSON，不要只给 Markdown。
-如果上游只会输出固定格式的 `finding` blocks，先用 `review-to-findings` 转成 findings JSON。
-如果 findings 是当前步骤现产出的，优先通过 stdin 传入；只有在已经存在真实 JSON 文件时才使用 --input <path>。
-然后由 $gh-address-cr 接管 session、GitHub threads（如果你选择的是 `review`）和 final-gate，直到通过。
-如果你要刷新本地 findings 并自动关闭消失的旧项，再加 `--sync`。
-```
-
-When the upstream review command must run first and `gh-address-cr` can only come second:
-
-```text
-先运行 <review-command> 审查这个 PR：<PR_URL>，并输出 findings JSON，不要只给 Markdown。
-如果该命令只输出固定格式的 `finding` blocks，先用 `review-to-findings` 转成 findings JSON。
-然后把这些 findings 交给 $gh-address-cr：
-- 如果你只想处理 local findings JSON，用 `findings`。
-- 如果你要同时处理 local findings 和 GitHub review threads，用 `review`。
-如果 findings 已经是现成文件，用 --input <path>；如果是当前步骤现产出的，优先用 --input - 通过 stdin 传入。
-如果你想刷新同一来源的 findings 并自动关闭消失项，再加 `--sync`。
-最后由 $gh-address-cr 负责 intake、session、reply/resolve 和 final-gate。
+如果当前 PR 还没有 findings，$gh-address-cr 应该进入 `WAITING_FOR_EXTERNAL_REVIEW`，
+写出 `producer-request.md`、`incoming-findings.json`、`incoming-findings.md`，
+并等待任意外部 review producer 提供 findings JSON 或固定格式的 `finding` blocks。
+收到 handoff 后，重新运行同一条 `review` 命令，继续处理 session、GitHub review threads、fix 和 final-gate。
 ```
 
 ## Choosing Fixes
