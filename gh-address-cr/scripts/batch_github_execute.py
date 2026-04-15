@@ -4,8 +4,8 @@ import argparse
 import json
 import sys
 
-from post_reply import current_login, list_pending_review_ids, submit_pending_reviews_result
-from python_common import gh_write_cmd, audit_event, is_transient_gh_failure
+from post_reply import submit_pending_reviews_result
+from python_common import audit_event, gh_write_cmd, github_viewer_login, is_transient_gh_failure, list_pending_review_ids
 
 def chunk_actions(actions: list[dict], max_size: int) -> list[list[dict]]:
     return [actions[i:i + max_size] for i in range(0, len(actions), max_size)]
@@ -47,7 +47,7 @@ def main() -> int:
         print("{}", file=sys.stdout)
         return 0
 
-    login = current_login()
+    login = github_viewer_login()
 
     results = {}
     had_error = False

@@ -249,6 +249,84 @@ raise SystemExit(1)
         self.assertEqual(payload["head_sha"], "cafebabe")
         self.assertEqual(payload["files_by_head"], {"cafebabe": [{"filename": "src/second.py"}]})
 
+    def test_python_common_threads_snapshot_helpers_round_trip_rows(self):
+        original_state_dir = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        try:
+            module = self._load_python_common_module()
+            rows = [
+                {"id": "THREAD_1", "isResolved": False, "path": "src/a.py", "line": 1},
+                {"id": "THREAD_2", "isResolved": True, "path": "src/b.py", "line": 2},
+            ]
+            snapshot = module.write_threads_snapshot(self.repo, self.pr, rows)
+            loaded = module.load_threads_snapshot_rows(snapshot)
+        finally:
+            if original_state_dir is None:
+                os.environ.pop("GH_ADDRESS_CR_STATE_DIR", None)
+            else:
+                os.environ["GH_ADDRESS_CR_STATE_DIR"] = original_state_dir
+
+        self.assertEqual(loaded, rows)
+
+    def test_python_common_copy_threads_snapshot_reuses_existing_snapshot_text(self):
+        original_state_dir = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        try:
+            module = self._load_python_common_module()
+            source = Path(self.temp_dir.name) / "source_snapshot.jsonl"
+            source.write_text(
+                '{"id":"THREAD_1","isResolved":false,"path":"src/a.py","line":1}\n',
+                encoding="utf-8",
+            )
+            copied = module.copy_threads_snapshot(self.repo, self.pr, source)
+            loaded = module.load_threads_snapshot_rows(copied)
+        finally:
+            if original_state_dir is None:
+                os.environ.pop("GH_ADDRESS_CR_STATE_DIR", None)
+            else:
+                os.environ["GH_ADDRESS_CR_STATE_DIR"] = original_state_dir
+
+        self.assertEqual(loaded, [{"id": "THREAD_1", "isResolved": False, "path": "src/a.py", "line": 1}])
+
+    def test_python_common_github_viewer_login_caches_value_within_process(self):
+        gh = self.bin_dir / "gh"
+        state_file = Path(self.temp_dir.name) / "gh_user_cache_state.json"
+        gh.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+state_file = Path({str(state_file.as_posix())!r})
+if not state_file.exists():
+    state_file.write_text(json.dumps({{"calls": 0}}))
+
+state = json.loads(state_file.read_text(encoding='utf-8'))
+args = sys.argv[1:]
+if args[:2] == ['api', 'user']:
+    state['calls'] += 1
+    state_file.write_text(json.dumps(state), encoding='utf-8')
+    print(json.dumps({{"login": "tester"}}))
+else:
+    raise SystemExit(f'unhandled gh args: {{args}}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        module = self._load_python_common_module()
+        original_path = os.environ["PATH"]
+        os.environ["PATH"] = f"{self.bin_dir}:{original_path}"
+        try:
+            first = module.github_viewer_login()
+            second = module.github_viewer_login()
+        finally:
+            os.environ["PATH"] = original_path
+
+        self.assertEqual(first, "tester")
+        self.assertEqual(second, "tester")
+        self.assertEqual(json.loads(state_file.read_text(encoding="utf-8"))["calls"], 1)
+
     def test_batch_resolve_rejects_invalid_lines(self):
         approved = Path(self.temp_dir.name) / "approved.txt"
         approved.write_text("NOPE THREAD_1\n", encoding="utf-8")

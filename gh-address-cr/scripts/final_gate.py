@@ -6,7 +6,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from python_common import audit_event, audit_summary_file, list_threads, session_engine, sha256_of_file, snapshot_file, workspace_dir
+from python_common import audit_event, audit_summary_file, copy_threads_snapshot, refresh_threads_snapshot, session_engine, sha256_of_file, snapshot_file, workspace_dir
 
 
 def main() -> int:
@@ -30,10 +30,9 @@ def main() -> int:
         if not snapshot_source.exists():
             print(f"Snapshot file not found: {snapshot_source}", file=sys.stderr)
             return 2
-        snapshot.write_text(snapshot_source.read_text(encoding="utf-8"), encoding="utf-8")
+        snapshot = copy_threads_snapshot(args.repo, args.pr_number, snapshot_source)
     else:
-        threads = list_threads(args.repo, args.pr_number)
-        snapshot.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in threads), encoding="utf-8")
+        _, snapshot = refresh_threads_snapshot(args.repo, args.pr_number)
 
     session_engine(["init", args.repo, args.pr_number], check=True)
     session_engine(["sync-github", args.repo, args.pr_number, "--scan-id", args.audit_id], input_text=snapshot.read_text(encoding="utf-8"), check=True)

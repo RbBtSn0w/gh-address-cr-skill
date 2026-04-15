@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from python_common import PullRequestReadCache, audit_event, gh_read_cmd, gh_read_json, gh_write_cmd, is_transient_gh_failure, run_cmd
+from python_common import PullRequestReadCache, audit_event, gh_read_json, gh_write_cmd, is_transient_gh_failure, load_pull_request_head_sha, run_cmd
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -129,11 +129,7 @@ def main() -> int:
     }
 
     try:
-        head_sha_result = gh_read_cmd(
-            ["gh", "pr", "view", args.pr, "--repo", args.repo, "--json", "headRefOid", "-q", ".headRefOid"],
-            check=True,
-        )
-        head_sha = head_sha_result.stdout.strip()
+        head_sha = load_pull_request_head_sha(args.repo, args.pr)
         files = load_cached_pr_files(args.repo, args.pr, head_sha)
         diff_position = compute_diff_position(files, path_value, int(line_value))
     except subprocess.CalledProcessError as exc:

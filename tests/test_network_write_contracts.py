@@ -89,7 +89,7 @@ class NetworkWriteContractTest(PythonScriptTestCase):
             "path": "src/a.py",
             "line": 4,
         }
-        module.gh_read_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "deadbeef\n", "")
+        module.load_pull_request_head_sha = lambda *args, **kwargs: "deadbeef"
         module.load_pr_files = lambda *args, **kwargs: [{"filename": "src/a.py", "patch": "@@ -1,1 +1,4 @@\n line1\n+line2\n+line3\n+line4"}]
         module.audit_event = lambda *args, **kwargs: None
         module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(

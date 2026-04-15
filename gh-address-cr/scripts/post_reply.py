@@ -6,29 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from python_common import audit_event, gh_read_json, gh_write_cmd, is_transient_gh_failure
-
-
-def current_login() -> str:
-    payload = gh_read_json(["api", "user"])
-    return payload["login"]
-
-
-def list_pending_review_ids(repo: str, pr_number: str, login: str) -> set[str]:
-    page = 1
-    pending: set[str] = set()
-    while True:
-        reviews = gh_read_json(["api", f"repos/{repo}/pulls/{pr_number}/reviews?per_page=100&page={page}"])
-        if not reviews:
-            break
-        for review in reviews:
-            if review.get("state") != "PENDING":
-                continue
-            if (review.get("user") or {}).get("login") != login:
-                continue
-            pending.add(review["node_id"])
-        page += 1
-    return pending
+from python_common import audit_event, gh_write_cmd, github_viewer_login, is_transient_gh_failure, list_pending_review_ids
 
 
 def submit_pending_reviews(repo: str, pr_number: str, review_ids: list[str]) -> list[str]:
@@ -141,7 +119,7 @@ def main() -> int:
         "error": None,
     }
     try:
-        login = current_login() if args.repo and args.pr_number else ""
+        login = github_viewer_login() if args.repo and args.pr_number else ""
         result = gh_write_cmd(
             ["gh", "api", "graphql", "-f", f"query={query}", "-F", f"threadId={args.thread_id}", "-F", f"body={reply_body}"],
             check=False,

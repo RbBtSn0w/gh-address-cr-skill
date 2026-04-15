@@ -12,6 +12,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SESSION_ENGINE = SCRIPT_DIR / "session_engine.py"
+_GITHUB_VIEWER_LOGIN: str | None = None
 
 
 def state_dir() -> Path:
@@ -142,6 +143,36 @@ class PullRequestReadCache:
         return files
 
 
+def encode_threads_snapshot(rows: list[dict]) -> str:
+    return "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows)
+
+
+def load_threads_snapshot_rows(path: Path) -> list[dict]:
+    rows: list[dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        rows.append(json.loads(line))
+    return rows
+
+
+def write_threads_snapshot(repo: str, pr_number: str, rows: list[dict]) -> Path:
+    path = snapshot_file(repo, pr_number)
+    path.write_text(encode_threads_snapshot(rows), encoding="utf-8")
+    return path
+
+
+def copy_threads_snapshot(repo: str, pr_number: str, source: Path) -> Path:
+    target = snapshot_file(repo, pr_number)
+    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    return target
+
+
+def refresh_threads_snapshot(repo: str, pr_number: str) -> tuple[list[dict], Path]:
+    rows = list_threads(repo, pr_number)
+    return rows, write_threads_snapshot(repo, pr_number, rows)
+
+
 def sha256_of_file(path: Path) -> str:
     import hashlib
 
@@ -240,6 +271,40 @@ def gh_read_json(args: list[str], *, retries: int = 3):
 def gh_write_json(args: list[str], *, input_text: str | None = None):
     result = gh_write_cmd(["gh", *args], input_text=input_text, check=True)
     return json.loads(result.stdout)
+
+
+def github_viewer_login(*, refresh: bool = False) -> str:
+    global _GITHUB_VIEWER_LOGIN
+    if _GITHUB_VIEWER_LOGIN and not refresh:
+        return _GITHUB_VIEWER_LOGIN
+    payload = gh_read_json(["api", "user"])
+    _GITHUB_VIEWER_LOGIN = payload["login"]
+    return _GITHUB_VIEWER_LOGIN
+
+
+def list_pending_review_ids(repo: str, pr_number: str, login: str) -> set[str]:
+    page = 1
+    pending: set[str] = set()
+    while True:
+        reviews = gh_read_json(["api", f"repos/{repo}/pulls/{pr_number}/reviews?per_page=100&page={page}"])
+        if not reviews:
+            break
+        for review in reviews:
+            if review.get("state") != "PENDING":
+                continue
+            if (review.get("user") or {}).get("login") != login:
+                continue
+            pending.add(review["node_id"])
+        page += 1
+    return pending
+
+
+def load_pull_request_head_sha(repo: str, pr_number: str) -> str:
+    result = gh_read_cmd(
+        ["gh", "pr", "view", pr_number, "--repo", repo, "--json", "headRefOid", "-q", ".headRefOid"],
+        check=True,
+    )
+    return result.stdout.strip()
 
 
 def session_engine(args: list[str], *, input_text: str | None = None, check: bool = False) -> subprocess.CompletedProcess:

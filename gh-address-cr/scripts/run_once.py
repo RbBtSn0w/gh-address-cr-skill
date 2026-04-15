@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from python_common import audit_event, list_threads, previous_snapshot_file, session_engine, session_file, snapshot_file
+from python_common import audit_event, previous_snapshot_file, refresh_threads_snapshot, session_engine, session_file, snapshot_file
 
 
 def unresolved_ids_from_snapshot_text(snapshot_text: str) -> list[str]:
@@ -33,8 +33,7 @@ def main() -> int:
     if snapshot.exists():
         prev_snapshot.write_text(snapshot.read_text(encoding="utf-8"), encoding="utf-8")
 
-    threads = list_threads(args.repo, args.pr_number)
-    snapshot.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in threads), encoding="utf-8")
+    threads, snapshot = refresh_threads_snapshot(args.repo, args.pr_number)
 
     print("== PR Review Threads ==")
     for row in threads:
