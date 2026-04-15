@@ -831,6 +831,46 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertIsNone(item["claimed_at"])
         self.assertIsNone(item["lease_expires_at"])
 
+    def test_update_items_batch_clears_stale_last_auto_failure_when_null_is_explicit(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "title": "Clear failure note",
+                    "body": "Batch update should be able to clear old failures.",
+                    "path": "src/batch_failure.py",
+                    "line": 27,
+                    "severity": "P2",
+                    "category": "correctness",
+                }
+            ]
+        )
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=payload, check=True)
+        session = self.load_session()
+        item_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+        session["items"][item_id]["last_auto_failure"] = "temporary failure"
+        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
+
+        batch_update = json.dumps(
+            [
+                {
+                    "item_id": item_id,
+                    "status": "CLOSED",
+                    "handled": True,
+                    "note": "Cleared batch failure.",
+                    "last_auto_action": "fix",
+                    "last_auto_failure": None,
+                }
+            ]
+        )
+        self.run_engine("update-items-batch", self.repo, self.pr, stdin=batch_update, check=True)
+
+        session = self.load_session()
+        item = session["items"][item_id]
+        self.assertEqual(item["status"], "CLOSED")
+        self.assertTrue(item["handled"])
+        self.assertIsNone(item["last_auto_failure"])
+
     def test_reclaim_stale_claims_releases_expired_lease(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         payload = json.dumps(

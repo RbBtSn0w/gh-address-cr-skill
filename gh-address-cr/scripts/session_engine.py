@@ -612,7 +612,7 @@ def cmd_update_items_batch(args):
             item["reply_url"] = update["reply_url"]
         if update.get("last_auto_action"):
             item["last_auto_action"] = update["last_auto_action"]
-        if update.get("last_auto_failure") is not None:
+        if "last_auto_failure" in update:
             item["last_auto_failure"] = update["last_auto_failure"]
         if update.get("needs_human") is not None:
             item["needs_human"] = update["needs_human"]
