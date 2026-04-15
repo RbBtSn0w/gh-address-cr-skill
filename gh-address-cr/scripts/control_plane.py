@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import uuid
-from python_common import findings_file, parse_dispatch, VALID_MODES, VALID_PRODUCERS
+from python_common import findings_file, parse_dispatch, snapshot_file, VALID_MODES, VALID_PRODUCERS
 SCRIPT_DIR = Path(__file__).resolve().parent
 RUN_ONCE = SCRIPT_DIR / "run_once.py"
 RUN_LOCAL_REVIEW = SCRIPT_DIR / "run_local_review.py"
@@ -173,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd = [sys.executable, str(FINAL_GATE), "--no-auto-clean"]
             if args.audit_id:
                 cmd.extend(["--audit-id", args.audit_id])
+            if args.mode in {"remote", "mixed"}:
+                cmd.extend(["--snapshot", str(snapshot_file(repo, pr_number))])
             cmd.extend([repo, pr_number])
             result = run_or_return(cmd)
             if result is not None:

@@ -685,6 +685,55 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("github-thread:THREAD_REMOTE", result.stdout)
 
+    def test_control_plane_remote_gate_reuses_run_once_snapshot(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+state_file = Path({str((Path(self.temp_dir.name) / "gh_gate_state.json").as_posix())!r})
+if not state_file.exists():
+    state_file.write_text(json.dumps({{"graphql_calls": 0}}))
+
+args = sys.argv[1:]
+if args[:2] == ['api', 'graphql']:
+    payload = json.loads(state_file.read_text())
+    payload['graphql_calls'] += 1
+    state_file.write_text(json.dumps(payload))
+    print(json.dumps({{
+        'data': {{
+            'repository': {{
+                'pullRequest': {{
+                    'reviewThreads': {{
+                        'pageInfo': {{'hasNextPage': False, 'endCursor': None}},
+                        'nodes': [{{
+                            'id': 'THREAD_GATE',
+                            'isResolved': True,
+                            'isOutdated': False,
+                            'path': 'src/gate.py',
+                            'line': 4,
+                            'firstComment': {{'nodes': [{{'url': 'https://example.test/thread/gate', 'body': 'gate'}}]}},
+                            'latestComment': {{'nodes': [{{'url': 'https://example.test/thread/gate', 'body': 'gate'}}]}},
+                        }}]
+                    }}
+                }}
+            }}
+        }}
+    }}))
+else:
+    raise SystemExit(f'unhandled gh args: {{args}}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(CONTROL_PLANE_PY), "remote", "--gate", self.repo, self.pr])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = json.loads((Path(self.temp_dir.name) / "gh_gate_state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["graphql_calls"], 1)
+
     def test_control_plane_mixed_json_runs_sync_and_ingest(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
