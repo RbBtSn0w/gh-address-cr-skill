@@ -115,6 +115,14 @@ Default to the smallest safe change.
 
 Before claiming repository work is complete, run the smallest verification that matches the change.
 
+For code changes, prefer running the current CI-equivalent checks locally before completion claims.
+At the time of writing, `.github/workflows/ci.yml` runs:
+
+- `ruff check gh-address-cr tests`
+- `python3 -m unittest discover -s tests`
+
+If your change touches a surface that CI also smoke-tests, run the matching local command as well instead of stopping at unit tests.
+
 Default repository verification:
 
 - `python3 -m unittest discover -s tests`
