@@ -344,7 +344,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  review consumes findings JSON; it does not generate findings.\n"
             "  High-level commands are the agent-safe public surface.\n"
             "Utility commands:\n"
-            "  cli.py review-to-findings owner/repo 123 --input findings.md\n"
+            "  cli.py review-to-findings owner/repo 123 --input finding-blocks.md\n"
             "  review-to-findings accepts fixed finding blocks only, not arbitrary Markdown.\n"
         ),
     )

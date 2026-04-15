@@ -159,68 +159,6 @@ When the upstream review command must run first and `gh-address-cr` can only com
 最后由 $gh-address-cr 负责 intake、session、reply/resolve 和 final-gate。
 ```
 
-Advanced producer categories:
-
-- `code-review`
-- `json`
-- `adapter`
-
-Producer naming rule:
-
-- `code-review` is a producer category, not a hardcoded skill name.
-- It can be backed by `/code-review`, `/code-review-aa`, `/code-review-bb`, `/code-review-cc`, or any other review step that emits structured findings JSON.
-- `gh-address-cr` only cares about the findings contract, not the upstream tool name.
-
-Producer selection rule:
-
-- `remote`
-  - no producer is needed
-- `ingest`
-  - producer may be omitted; default is `json`
-- `local` or `mixed`
-  - producer must be explicit
-
-Use this mapping:
-
-| Upstream situation | Producer to use |
-| --- | --- |
-| Only GitHub review threads | none (`remote`) |
-| Existing findings JSON file | `json` |
-| A review-style skill/command emits findings JSON first | `code-review` |
-| A command directly prints findings JSON as its interface | `adapter` |
-
-Important:
-
-- `producer=code-review` is the category even if the upstream tool is named `/code-review-aa` or `/code-review-bb`.
-- Do not put the upstream tool name itself into the producer slot.
-- Example:
-  - correct: `review <owner/repo> <pr>`
-  - incorrect: `code-review-aa <owner/repo> <pr>`
-
-Meaning:
-
-- `remote`
-  - only GitHub review threads are part of the session
-- `local`
-  - only locally produced findings are part of the session
-- `mixed`
-  - GitHub review threads and local findings are both part of the session
-- `ingest`
-  - import existing findings JSON into the session without running a local adapter
-
-This keeps `gh-address-cr` as the session/gate/orchestration layer while letting different review producers feed findings into the same PR workflow.
-
-The exact dispatch behavior for each supported `mode + producer` combination is documented in:
-
-- `gh-address-cr/references/mode-producer-matrix.md`
-- `gh-address-cr/references/newcomer-playbook.md`
-
-The preferred automation entrypoint is now:
-
-```bash
-python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--human]
-```
-
 ## Choosing Fixes
 
 `gh-address-cr` is not "fix every comment immediately". The intended workflow is:
@@ -326,6 +264,68 @@ python3 gh-address-cr/scripts/cli.py adapter owner/repo 123 python3 tools/review
 By default, the skill stores its PR progress + audit artifacts in a user cache directory
 (override with `GH_ADDRESS_CR_STATE_DIR`). If the cache is purged, the workflow can be rebuilt
 from GitHub thread state; the main downside is potential repeated work.
+
+Advanced producer categories:
+
+- `code-review`
+- `json`
+- `adapter`
+
+Producer naming rule:
+
+- `code-review` is a producer category, not a hardcoded skill name.
+- It can be backed by `/code-review`, `/code-review-aa`, `/code-review-bb`, `/code-review-cc`, or any other review step that emits structured findings JSON.
+- `gh-address-cr` only cares about the findings contract, not the upstream tool name.
+
+Producer selection rule:
+
+- `remote`
+  - no producer is needed
+- `ingest`
+  - producer may be omitted; default is `json`
+- `local` or `mixed`
+  - producer must be explicit
+
+Use this mapping:
+
+| Upstream situation | Producer to use |
+| --- | --- |
+| Only GitHub review threads | none (`remote`) |
+| Existing findings JSON file | `json` |
+| A review-style skill/command emits findings JSON first | `code-review` |
+| A command directly prints findings JSON as its interface | `adapter` |
+
+Important:
+
+- `producer=code-review` is the category even if the upstream tool is named `/code-review-aa` or `/code-review-bb`.
+- Do not put the upstream tool name itself into the producer slot.
+- Example:
+  - correct: `review <owner/repo> <pr>`
+  - incorrect: `code-review-aa <owner/repo> <pr>`
+
+Meaning:
+
+- `remote`
+  - only GitHub review threads are part of the session
+- `local`
+  - only locally produced findings are part of the session
+- `mixed`
+  - GitHub review threads and local findings are both part of the session
+- `ingest`
+  - import existing findings JSON into the session without running a local adapter
+
+This keeps `gh-address-cr` as the session/gate/orchestration layer while letting different review producers feed findings into the same PR workflow.
+
+The exact dispatch behavior for each supported `mode + producer` combination is documented in:
+
+- `gh-address-cr/references/mode-producer-matrix.md`
+- `gh-address-cr/references/newcomer-playbook.md`
+
+The preferred automation entrypoint is now:
+
+```bash
+python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--human]
+```
 
 ## Core Workflow
 

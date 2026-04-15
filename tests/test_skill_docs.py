@@ -77,3 +77,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "exit_code",
         ):
             self.assertIn(f"`{field}`", text)
+
+    def test_readme_defers_advanced_dispatch_details_until_after_first_read_contract(self):
+        text = README_MD.read_text(encoding="utf-8")
+        self.assertLess(text.index("## Public Interface"), text.index("## Automatic Review Workflow"))
+        self.assertLess(text.index("## Automatic Review Workflow"), text.index("Advanced producer categories:"))

@@ -61,7 +61,7 @@ class PythonWrapperCLITest(PythonScriptTestCase):
     def test_cli_root_help_documents_converter_as_fixed_finding_blocks_only(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "--help"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("review-to-findings owner/repo 123 --input findings.md", result.stdout)
+        self.assertIn("review-to-findings owner/repo 123 --input finding-blocks.md", result.stdout)
         self.assertIn("fixed finding blocks only", result.stdout)
         self.assertNotIn("review-to-findings owner/repo 123 --input review.md", result.stdout)
 
