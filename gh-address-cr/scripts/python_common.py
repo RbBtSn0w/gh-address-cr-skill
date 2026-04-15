@@ -83,6 +83,65 @@ def validation_file(repo: str, pr_number: str, name: str) -> Path:
     return workspace_dir(repo, pr_number) / name
 
 
+def github_pr_cache_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "github_pr_cache.json"
+
+
+class PullRequestReadCache:
+    def __init__(self, repo: str, pr_number: str):
+        self.repo = repo
+        self.pr_number = pr_number
+        self.path = github_pr_cache_file(repo, pr_number)
+        self._payload = self._load()
+
+    def _load(self) -> dict:
+        if not self.path.exists():
+            return {}
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return payload
+
+    def _save(self) -> None:
+        self.path.write_text(json.dumps(self._payload, sort_keys=True), encoding="utf-8")
+
+    def head_sha(self) -> str | None:
+        value = self._payload.get("head_sha")
+        return value if isinstance(value, str) and value else None
+
+    def set_head_sha(self, head_sha: str) -> None:
+        self._payload["head_sha"] = head_sha
+        files_by_head = self._payload.get("files_by_head")
+        if not isinstance(files_by_head, dict):
+            self._payload["files_by_head"] = {}
+        self._save()
+
+    def files_for_head(self, head_sha: str) -> list[dict] | None:
+        files_by_head = self._payload.get("files_by_head")
+        if not isinstance(files_by_head, dict):
+            return None
+        files = files_by_head.get(head_sha)
+        return files if isinstance(files, list) else None
+
+    def store_files_for_head(self, head_sha: str, files: list[dict]) -> None:
+        self._payload["head_sha"] = head_sha
+        self._payload["files_by_head"] = {head_sha: files}
+        self._save()
+
+    def get_or_load_files(self, head_sha: str, loader) -> list[dict]:
+        cached = self.files_for_head(head_sha)
+        if cached is not None:
+            self._payload["head_sha"] = head_sha
+            self._save()
+            return cached
+        files = loader()
+        self.store_files_for_head(head_sha, files)
+        return files
+
+
 def sha256_of_file(path: Path) -> str:
     import hashlib
 

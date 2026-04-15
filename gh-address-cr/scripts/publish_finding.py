@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from python_common import audit_event, gh_read_cmd, gh_read_json, gh_write_cmd, is_transient_gh_failure, run_cmd, workspace_dir
+from python_common import PullRequestReadCache, audit_event, gh_read_cmd, gh_read_json, gh_write_cmd, is_transient_gh_failure, run_cmd
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -42,23 +42,9 @@ def load_pr_files(repo: str, pr_number: str) -> list[dict]:
     return files
 
 
-def pr_files_cache_file(repo: str, pr_number: str) -> Path:
-    return workspace_dir(repo, pr_number) / "publish_finding_files_cache.json"
-
-
 def load_cached_pr_files(repo: str, pr_number: str, head_sha: str) -> list[dict]:
-    cache_path = pr_files_cache_file(repo, pr_number)
-    if cache_path.exists():
-        try:
-            payload = json.loads(cache_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            payload = {}
-        if payload.get("head_sha") == head_sha and isinstance(payload.get("files"), list):
-            return payload["files"]
-
-    files = load_pr_files(repo, pr_number)
-    cache_path.write_text(json.dumps({"head_sha": head_sha, "files": files}, sort_keys=True), encoding="utf-8")
-    return files
+    cache = PullRequestReadCache(repo, pr_number)
+    return cache.get_or_load_files(head_sha, lambda: load_pr_files(repo, pr_number))
 
 
 def compute_diff_position(files: list[dict], target_path: str, target_line: int) -> int:

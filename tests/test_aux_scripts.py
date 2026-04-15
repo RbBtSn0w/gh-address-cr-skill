@@ -8,6 +8,13 @@ from tests.helpers import BATCH_RESOLVE_PY, CLEAN_STATE_PY, GENERATE_REPLY_PY, P
 
 
 class AuxiliaryScriptsTest(PythonScriptTestCase):
+    def _load_python_common_module(self):
+        spec = importlib.util.spec_from_file_location("python_common_module", PYTHON_COMMON_PY)
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
     def test_run_once_helper_parses_each_snapshot_line_once(self):
         spec = importlib.util.spec_from_file_location("run_once_module", RUN_ONCE_PY)
         self.assertIsNotNone(spec)
@@ -186,6 +193,61 @@ raise SystemExit(1)
 
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(json.loads(state_file.read_text(encoding="utf-8"))["calls"], 1)
+
+    def test_python_common_pull_request_read_cache_reuses_files_for_same_head(self):
+        original_state_dir = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        try:
+            module = self._load_python_common_module()
+            cache = module.PullRequestReadCache(self.repo, self.pr)
+            calls = {"count": 0}
+
+            def loader():
+                calls["count"] += 1
+                return [{"filename": "src/example.py"}]
+
+            first = cache.get_or_load_files("deadbeef", loader)
+            second = cache.get_or_load_files("deadbeef", loader)
+        finally:
+            if original_state_dir is None:
+                os.environ.pop("GH_ADDRESS_CR_STATE_DIR", None)
+            else:
+                os.environ["GH_ADDRESS_CR_STATE_DIR"] = original_state_dir
+
+        self.assertEqual(first, [{"filename": "src/example.py"}])
+        self.assertEqual(second, first)
+        self.assertEqual(calls["count"], 1)
+
+    def test_python_common_pull_request_read_cache_replaces_files_when_head_changes(self):
+        original_state_dir = os.environ.get("GH_ADDRESS_CR_STATE_DIR")
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        try:
+            module = self._load_python_common_module()
+            cache = module.PullRequestReadCache(self.repo, self.pr)
+            calls = {"count": 0}
+
+            def load_first():
+                calls["count"] += 1
+                return [{"filename": "src/first.py"}]
+
+            def load_second():
+                calls["count"] += 1
+                return [{"filename": "src/second.py"}]
+
+            cache.get_or_load_files("deadbeef", load_first)
+            second = cache.get_or_load_files("cafebabe", load_second)
+            cache_path = module.github_pr_cache_file(self.repo, self.pr)
+            payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        finally:
+            if original_state_dir is None:
+                os.environ.pop("GH_ADDRESS_CR_STATE_DIR", None)
+            else:
+                os.environ["GH_ADDRESS_CR_STATE_DIR"] = original_state_dir
+
+        self.assertEqual(second, [{"filename": "src/second.py"}])
+        self.assertEqual(calls["count"], 2)
+        self.assertEqual(payload["head_sha"], "cafebabe")
+        self.assertEqual(payload["files_by_head"], {"cafebabe": [{"filename": "src/second.py"}]})
 
     def test_batch_resolve_rejects_invalid_lines(self):
         approved = Path(self.temp_dir.name) / "approved.txt"
