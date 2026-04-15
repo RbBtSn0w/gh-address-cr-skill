@@ -17,6 +17,17 @@ Use this skill as the PR review orchestrator. It owns session state, intake rout
 /gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...>
 ```
 
+## Packaging Scope
+
+This file is part of the packaged `gh-address-cr` skill.
+All paths in this document are relative to the installed skill root.
+
+- `scripts/...` means files inside this packaged skill
+- `references/...` means skill-owned reference docs
+- `agents/openai.yaml` is an assistant-specific hint file inside the skill
+
+A surrounding source repository may also contain repo-level tests, CI, and release metadata, but those are outside the packaged skill payload.
+
 ## Agent Execution Ladder
 
 Read this skill in this order when you are an AI agent:
@@ -108,7 +119,6 @@ High-level commands emit structured JSON by default. Agents should consume these
 
 - Dispatch details: `references/mode-producer-matrix.md`
 - Review triage checklist: `references/cr-triage-checklist.md`
-- Operator walkthrough: `references/newcomer-playbook.md`
 - Low-level scripts are implementation details, not the public agent surface.
 
 Examples that require advanced dispatch details live in the reference docs instead of the first-read contract.

@@ -327,7 +327,6 @@ This keeps `gh-address-cr` as the session/gate/orchestration layer while letting
 The exact dispatch behavior for each supported `mode + producer` combination is documented in:
 
 - `gh-address-cr/references/mode-producer-matrix.md`
-- `gh-address-cr/references/newcomer-playbook.md`
 
 The preferred automation entrypoint is now:
 
@@ -639,6 +638,21 @@ npx skills update
 - Audit log + audit summary + summary hash output
 - Python-first implementation with a single CLI entrypoint
 - Module-split automated tests for session, wrappers, and helper scripts
+
+## Repository Layout Model
+
+This git repository is the development and release wrapper around one shipped skill.
+
+- Published skill payload: the entire `gh-address-cr/` directory
+- Repo-level verification harness: `tests/`
+- Repo-level release and contributor files: `.github/`, `pyproject.toml`, `CHANGELOG.md`, root `AGENTS.md`, and other top-level metadata
+
+Path convention:
+
+- Repo-level docs and commands that are executed from repository root use paths like `gh-address-cr/scripts/cli.py`
+- Skill-owned docs inside `gh-address-cr/` use paths relative to the skill root, such as `scripts/cli.py`, `references/...`, and `agents/openai.yaml`
+
+If a rule or instruction must ship with the installed skill, it must live inside `gh-address-cr/`, not only at repository root.
 
 ## Skill folder
 

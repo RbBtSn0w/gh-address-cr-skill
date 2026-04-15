@@ -11,6 +11,12 @@ OPENAI_HINT_YAML = ROOT / "gh-address-cr" / "agents" / "openai.yaml"
 
 
 class SkillDocumentationContractTest(unittest.TestCase):
+    def test_skill_declares_packaged_skill_root_scope(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        self.assertIn("This file is part of the packaged `gh-address-cr` skill.", text)
+        self.assertIn("All paths in this document are relative to the installed skill root.", text)
+        self.assertIn("outside the packaged skill payload", text)
+
     def test_skill_examples_use_review_as_main_entrypoint_without_required_input(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("/gh-address-cr review <owner/repo> <pr_number>", text)
@@ -65,11 +71,21 @@ class SkillDocumentationContractTest(unittest.TestCase):
             self.assertNotIn("gh-address-cr/references/", text, msg=str(path))
             self.assertIn("scripts/cli.py", text, msg=str(path))
 
+    def test_referenced_skill_owned_docs_exist(self):
+        for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD, OPENAI_HINT_YAML):
+            self.assertTrue(path.exists(), msg=str(path))
+
     def test_readme_examples_use_single_review_main_entrypoint(self):
         text = README_MD.read_text(encoding="utf-8")
         self.assertIn("/gh-address-cr review <owner/repo> <pr_number>", text)
         self.assertNotIn("/gh-address-cr review <owner/repo> <pr_number> --input <path>|-", text)
         self.assertIn("$gh-address-cr review <PR_URL>", text)
+
+    def test_readme_documents_repo_root_vs_skill_root_layout(self):
+        text = README_MD.read_text(encoding="utf-8")
+        self.assertIn("Published skill payload: the entire `gh-address-cr/` directory", text)
+        self.assertIn("Repo-level verification harness: `tests/`", text)
+        self.assertIn("If a rule or instruction must ship with the installed skill, it must live inside `gh-address-cr/`", text)
 
     def test_readme_matches_adapter_public_semantics(self):
         text = README_MD.read_text(encoding="utf-8")
