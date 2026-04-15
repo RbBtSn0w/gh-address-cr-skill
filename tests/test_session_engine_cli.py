@@ -772,6 +772,65 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertTrue(item["handled"])
         self.assertFalse(item["needs_human"])
 
+    def test_update_items_batch_updates_core_fields_and_clears_claim(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "title": "Batch update me",
+                    "body": "Batch write-back should update the session once.",
+                    "path": "src/batch_update.py",
+                    "line": 21,
+                    "severity": "P2",
+                    "category": "correctness",
+                }
+            ]
+        )
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", stdin=payload, check=True)
+        session = self.load_session()
+        item_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+        session["items"][item_id]["claimed_by"] = "agent-a"
+        session["items"][item_id]["claimed_at"] = "2026-04-14T00:00:00+00:00"
+        session["items"][item_id]["lease_expires_at"] = "2026-04-16T00:00:00+00:00"
+        self.session_file().write_text(json.dumps(session, indent=2, sort_keys=True), encoding="utf-8")
+
+        batch_update = json.dumps(
+            [
+                {
+                    "item_id": item_id,
+                    "status": "CLOSED",
+                    "handled": True,
+                    "decision": "fix",
+                    "note": "Closed in batch.",
+                    "reply_posted": True,
+                    "reply_url": "https://example.test/reply",
+                    "last_auto_action": "fix",
+                    "last_auto_failure": None,
+                    "needs_human": False,
+                    "clear_claim": True,
+                }
+            ]
+        )
+        result = self.run_engine("update-items-batch", self.repo, self.pr, stdin=batch_update, check=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        session = self.load_session()
+        item = session["items"][item_id]
+        self.assertEqual(item["status"], "CLOSED")
+        self.assertTrue(item["handled"])
+        self.assertIsNotNone(item["handled_at"])
+        self.assertEqual(item["decision"], "fix")
+        self.assertEqual(item["resolution_note"], "Closed in batch.")
+        self.assertTrue(item["reply_posted"])
+        self.assertEqual(item["reply_url"], "https://example.test/reply")
+        self.assertEqual(item["last_auto_action"], "fix")
+        self.assertIsNone(item["last_auto_failure"])
+        self.assertFalse(item["needs_human"])
+        self.assertFalse(item["blocking"])
+        self.assertIsNone(item["claimed_by"])
+        self.assertIsNone(item["claimed_at"])
+        self.assertIsNone(item["lease_expires_at"])
+
     def test_reclaim_stale_claims_releases_expired_lease(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         payload = json.dumps(

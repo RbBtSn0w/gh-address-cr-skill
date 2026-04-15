@@ -584,6 +584,52 @@ def cmd_update_item(args):
     return 0
 
 
+
+def cmd_update_items_batch(args):
+    session = load_session(args.repo, args.pr_number)
+    updates = read_records_from_stdin()
+    for update in updates:
+        item_id = update["item_id"]
+        status = update.get("status")
+        item = ensure_item(session, item_id)
+        if status:
+            validate_transition(item["status"], status)
+            item["status"] = status
+            item["blocking"] = blocking_for_status(status)
+        item["updated_at"] = utc_now()
+        if update.get("handled") is not None:
+            item["handled"] = update["handled"]
+            item["handled_at"] = utc_now() if item["handled"] else None
+        if update.get("decision"):
+            item["decision"] = update["decision"]
+        note = update.get("note")
+        if note:
+            item["resolution_note"] = note
+            item["history"].append(history_event("status-updated-batch", note, actor=update.get("actor", "system")))
+        if update.get("reply_posted"):
+            item["reply_posted"] = True
+        if update.get("reply_url"):
+            item["reply_url"] = update["reply_url"]
+        if update.get("last_auto_action"):
+            item["last_auto_action"] = update["last_auto_action"]
+        if update.get("last_auto_failure") is not None:
+            item["last_auto_failure"] = update["last_auto_failure"]
+        if update.get("needs_human") is not None:
+            item["needs_human"] = update["needs_human"]
+        if update.get("clear_claim"):
+            clear_claim(item)
+    save_session(session)
+    append_audit_event(
+        args.repo,
+        args.pr_number,
+        "update-items-batch",
+        "ok",
+        "Updated items in batch",
+        {"count": len(updates)},
+    )
+    print(f"Updated {len(updates)} items.")
+    return 0
+
 def cmd_reclaim_stale_claims(args):
     session = load_session(args.repo, args.pr_number)
     now = datetime.now(timezone.utc)
@@ -875,6 +921,12 @@ def build_parser():
     update_item.add_argument("--actor", default="system")
     update_item.add_argument("--handled", action="store_true")
     update_item.set_defaults(func=cmd_update_item)
+
+
+    update_items_batch = sub.add_parser("update-items-batch")
+    update_items_batch.add_argument("repo")
+    update_items_batch.add_argument("pr_number")
+    update_items_batch.set_defaults(func=cmd_update_items_batch)
 
     mark_handled = sub.add_parser("mark-handled")
     mark_handled.add_argument("repo")
