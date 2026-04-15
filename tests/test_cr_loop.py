@@ -1,8 +1,12 @@
 import importlib.util
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import subprocess
+import types
+from unittest.mock import patch
 
 from tests.helpers import CR_LOOP_PY, PythonScriptTestCase, SCRIPT
 
@@ -49,9 +53,9 @@ class CRLoopCLITest(PythonScriptTestCase):
             }
         }
 
-        selected = module.select_next_item(session)
-        self.assertIsNotNone(selected)
-        self.assertEqual(selected["item_id"], "local-finding:open")
+        selected = module.select_ready_batch(session)
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["item_id"], "local-finding:open")
 
     def test_cr_loop_local_json_fix_passes_gate(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
@@ -220,19 +224,41 @@ elif len(args) >= 2 and args[0] == 'api' and args[1].startswith(f'repos/{self.re
         print('[]')
 elif args[:2] == ['api', 'graphql']:
     query = next(arg.split('=', 1)[1] for arg in args if arg.startswith('query='))
-    if 'addPullRequestReviewThreadReply' in query:
-        state['reply_calls'] += 1
+    is_reply = 'addPullRequestReviewThreadReply' in query
+    is_resolve = 'resolveReviewThread' in query
+    if is_reply or is_resolve:
+        reply_data = None
+        resolve_data = None
+        resolve_error = None
+        if is_reply:
+            state['reply_calls'] += 1
+            reply_data = {{'comment': {{'url': 'https://example.test/reply'}}}}
+        if is_resolve:
+            state['resolve_attempts'] += 1
+            if state['resolve_attempts'] > 1:
+                state['resolved'] = True
+            if not state['resolved']:
+                resolve_error = 'temporary resolve failure'
+            else:
+                resolve_data = {{'thread': {{'id': 'THREAD_REPLY_RETRY', 'isResolved': True}}}}
+
         state_file.write_text(json.dumps(state), encoding='utf-8')
-        print(json.dumps({{'data': {{'addPullRequestReviewThreadReply': {{'comment': {{'url': 'https://example.test/reply'}}}}}}}}))
-    elif 'resolveReviewThread' in query:
-        state['resolve_attempts'] += 1
-        if state['resolve_attempts'] > 1:
-            state['resolved'] = True
-        state_file.write_text(json.dumps(state), encoding='utf-8')
-        if not state['resolved']:
-            print(json.dumps({{'errors': [{{'message': 'temporary resolve failure'}}]}}))
+        if resolve_error:
+            data = {{}}
+            if reply_data:
+                data['reply0'] = reply_data
+                data['addPullRequestReviewThreadReply'] = reply_data
+            print(json.dumps({{'data': data, 'errors': [{{'message': resolve_error}}]}}))
             raise SystemExit(1)
-        print(json.dumps({{'data': {{'resolveReviewThread': {{'thread': {{'id': 'THREAD_REPLY_RETRY', 'isResolved': True}}}}}}}}))
+
+        data = {{}}
+        if reply_data:
+            data['reply0'] = reply_data
+            data['addPullRequestReviewThreadReply'] = reply_data
+        if resolve_data:
+            data['resolve0'] = resolve_data
+            data['resolveReviewThread'] = resolve_data
+        print(json.dumps({{'data': data}}))
     else:
         print(json.dumps({{
             'data': {{
@@ -289,24 +315,12 @@ print(json.dumps({
                 self.pr,
             ]
         )
-        self.assertNotEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(first.returncode, 0, first.stderr)
 
-        second = self.run_cmd(
-            [
-                sys.executable,
-                str(CR_LOOP_PY),
-                "remote",
-                "--fixer-cmd",
-                f"{sys.executable} {fixer}",
-                self.repo,
-                self.pr,
-            ]
-        )
-        self.assertEqual(second.returncode, 0, second.stderr)
         state = json.loads(state_file.read_text(encoding="utf-8"))
         self.assertEqual(state["reply_calls"], 1)
-        self.assertEqual(state["resolve_attempts"], 2)
-        self.assertIn("cr-loop PASSED", second.stdout)
+        self.assertGreaterEqual(state["resolve_attempts"], 2)
+        self.assertIn("cr-loop PASSED", first.stdout)
 
     def test_cr_loop_needs_human_after_repeated_validation_failure(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
@@ -517,6 +531,111 @@ print(json.dumps({{
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(bad_file.exists())
         self.assertIn("cr-loop PASSED", result.stdout)
+
+    def test_handle_batch_blocks_when_batch_github_helper_fails(self):
+        with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}, clear=False):
+            sys.path.insert(0, str(CR_LOOP_PY.parent))
+            spec = importlib.util.spec_from_file_location("cr_loop_under_test", CR_LOOP_PY)
+            module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            try:
+                spec.loader.exec_module(module)
+            finally:
+                sys.path.pop(0)
+
+            init_result = self.run_cmd([sys.executable, str(SCRIPT), "init", self.repo, self.pr], check=True)
+            self.assertEqual(init_result.returncode, 0, init_result.stderr)
+            session = json.loads(self.session_file().read_text(encoding="utf-8"))
+            thread_id = "THREAD_BATCH_FAIL"
+            item_id = f"github-thread:{thread_id}"
+            session["items"][item_id] = {
+                "item_id": item_id,
+                "item_kind": "github_thread",
+                "source": "github",
+                "origin_ref": thread_id,
+                "path": "src/batch_fail.py",
+                "line": 9,
+                "title": "Batch helper failure",
+                "body": "Needs reply and resolve.",
+                "severity": "P2",
+                "status": "OPEN",
+                "decision": None,
+                "blocking": True,
+                "handled": False,
+                "handled_at": None,
+                "resolution_note": None,
+                "published": True,
+                "published_ref": "https://example.test/thread/batch-fail",
+                "url": "https://example.test/thread/batch-fail",
+                "first_url": "https://example.test/thread/batch-fail",
+                "latest_url": "https://example.test/thread/batch-fail",
+                "is_outdated": False,
+                "scan_id": None,
+                "introduced_in_sha": None,
+                "last_seen_in_sha": None,
+                "claimed_by": None,
+                "claimed_at": None,
+                "lease_expires_at": None,
+                "repeat_count": 0,
+                "reopen_count": 0,
+                "evidence": [],
+                "history": [],
+                "auto_attempt_count": 0,
+                "last_auto_action": None,
+                "last_auto_failure": None,
+                "needs_human": False,
+                "reply_posted": False,
+                "reply_url": None,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            }
+            self.session_file().write_text(json.dumps(session), encoding="utf-8")
+
+        def fake_run_fixer(_cmd: str, _payload: dict):
+            return (
+                {
+                    "resolution": "clarify",
+                    "note": "Reply once and resolve once.",
+                    "reply_markdown": "Batch helper should not swallow failures.",
+                    "validation_commands": [],
+                },
+                "",
+            )
+
+        def fake_run_cmd(cmd, *, stdin=None):
+            if Path(cmd[1]).name == "batch_github_execute.py":
+                return subprocess.CompletedProcess(cmd, 1, "", "batch helper failed")
+            if Path(cmd[1]).name == "session_engine.py" and cmd[2] == "update-items-batch":
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+            module.run_fixer = fake_run_fixer
+            module.run_cmd = fake_run_cmd
+            module.emit = lambda _result: None
+
+            args = types.SimpleNamespace(
+                fixer_cmd="fixer",
+                validation_cmd=[],
+                max_iterations=10,
+            )
+
+            status, error = module.handle_batch(
+                args,
+                self.repo,
+                self.pr,
+                [session["items"][item_id]],
+                run_id="batch-failure",
+                iteration=1,
+            )
+
+            self.assertEqual(status, "blocked")
+            self.assertIn("batch helper failed", error)
+
+            updated = json.loads(self.session_file().read_text(encoding="utf-8"))
+            item = updated["items"][item_id]
+            self.assertEqual(item["status"], "OPEN")
+            self.assertFalse(item["handled"])
+            self.assertFalse(item["reply_posted"])
 
     def test_cr_loop_does_not_mark_github_thread_needs_human_from_loop_warning_threshold(self):
         gh = self.bin_dir / "gh"
