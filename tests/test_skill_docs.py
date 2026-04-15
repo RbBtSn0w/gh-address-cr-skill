@@ -131,7 +131,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
 
     def test_readme_keeps_one_canonical_prompt_template_section(self):
         text = README_MD.read_text(encoding="utf-8")
-        self.assertEqual(text.count("使用 $gh-address-cr 完整处理这个 PR：<PR_URL>"), 1)
+        self.assertEqual(text.count("Minimal user prompt:"), 1)
+        self.assertEqual(text.count("Ready-to-use prompt variants:"), 1)
         self.assertNotIn("## Prompt Templates", text)
 
     def test_readme_documents_executable_adapter_flag_examples(self):
@@ -150,6 +151,10 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("WAITING_FOR_EXTERNAL_REVIEW", readme_text)
         self.assertIn("如果你自己就是外部 review producer", readme_text)
         self.assertIn("不要只输出普通 Markdown 审查报告", readme_text)
+        self.assertIn("Ready-to-use prompt variants:", readme_text)
+        self.assertIn("Short generic:", readme_text)
+        self.assertIn("Explicit `$code-review` producer:", readme_text)
+        self.assertIn("Any external review producer:", readme_text)
 
     def test_readme_moves_input_and_producer_routing_to_advanced_section(self):
         readme_text = README_MD.read_text(encoding="utf-8")

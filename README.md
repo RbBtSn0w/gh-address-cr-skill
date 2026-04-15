@@ -174,6 +174,46 @@ Prompt patterns:
 收到 handoff 后，重新运行同一条 `review` 命令，继续处理 session、GitHub review threads、fix 和 final-gate，直到通过。
 ```
 
+Ready-to-use prompt variants:
+
+- Short generic:
+
+```text
+使用 $gh-address-cr 完整处理这个 PR：<PR_URL>。
+```
+
+- Explicit `$code-review` producer:
+
+```text
+使用 $gh-address-cr 完整处理这个 PR：<PR_URL>。
+
+先运行 $gh-address-cr review。
+如果返回 WAITING_FOR_EXTERNAL_REVIEW，就使用 $code-review 作为外部 review producer。
+按照 producer-request.md 的要求交接：
+- 优先把 findings JSON 写入 incoming-findings.json
+- 如果只能输出固定格式的 `finding` blocks，就写入 incoming-findings.md
+- 不要只输出普通 Markdown 审查报告
+
+写入 handoff 文件后，重新运行同一条 $gh-address-cr review 命令，
+继续处理 session、GitHub threads、fix、reply/resolve 和 final-gate，直到通过。
+```
+
+- Any external review producer:
+
+```text
+使用 $gh-address-cr 完整处理这个 PR：<PR_URL>。
+
+先运行 $gh-address-cr review。
+如果返回 WAITING_FOR_EXTERNAL_REVIEW，就使用当前环境中可用的外部 review 能力完成审查。
+按照 producer-request.md 的要求交接：
+- 优先把 findings JSON 写入 incoming-findings.json
+- 如果只能输出固定格式的 `finding` blocks，就写入 incoming-findings.md
+- 不要只输出普通 Markdown 审查报告
+
+写入 handoff 文件后，重新运行同一条 $gh-address-cr review 命令，
+继续处理 session、GitHub threads、fix、reply/resolve 和 final-gate，直到通过。
+```
+
 ## Choosing Fixes
 
 `gh-address-cr` is not "fix every comment immediately". The intended workflow is:
