@@ -116,7 +116,7 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertIsNone(item["handled_at"])
         self.assertEqual(item["reopen_count"], 1)
 
-    def test_gate_treats_stale_github_thread_as_non_unresolved(self):
+    def test_gate_treats_stale_github_thread_as_unresolved(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         payload = json.dumps(
             [
@@ -144,11 +144,11 @@ class SessionEngineCLITest(SessionEngineTestCase):
         )
 
         session = self.load_session()
-        self.assertEqual(session["metrics"]["unresolved_github_threads_count"], 0)
+        self.assertEqual(session["metrics"]["unresolved_github_threads_count"], 1)
 
         gate = self.run_engine("gate", self.repo, self.pr)
-        self.assertEqual(gate.returncode, 0, gate.stderr)
-        self.assertIn("REMOTE GATE PASS", gate.stdout)
+        self.assertNotEqual(gate.returncode, 0, gate.stderr)
+        self.assertIn("REMOTE GATE FAIL", gate.stdout)
 
     def test_run_local_review_deduplicates_findings(self):
         self.run_engine("init", self.repo, self.pr, check=True)
@@ -1144,7 +1144,8 @@ class SessionEngineCLITest(SessionEngineTestCase):
         session = self.load_session()
         item = session["items"]["github-thread:THREAD_STALE"]
         self.assertEqual(item["status"], "STALE")
-        self.assertFalse(item["blocking"])
+        self.assertTrue(item["blocking"])
+        self.assertEqual(session["metrics"]["unresolved_github_threads_count"], 1)
 
     def test_sync_github_preserves_dropped_thread_until_resolved(self):
         self.run_engine("init", self.repo, self.pr, check=True)
@@ -1237,7 +1238,7 @@ class SessionEngineCLITest(SessionEngineTestCase):
         session = self.load_session()
         item = session["items"]["github-thread:THREAD_MANUAL_STALE"]
         self.assertEqual(item["status"], "STALE")
-        self.assertFalse(item["blocking"])
+        self.assertTrue(item["blocking"])
 
     def test_sync_github_reopens_deferred_thread_when_github_is_still_unresolved(self):
         self.run_engine("init", self.repo, self.pr, check=True)

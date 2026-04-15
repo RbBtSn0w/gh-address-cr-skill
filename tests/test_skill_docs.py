@@ -25,6 +25,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertNotIn("$gh-address-cr review <PR_URL> --input findings.json", text)
         self.assertIn("If `review` returns `BLOCKED`, inspect the loop request artifact,", text)
         self.assertIn("then rerun the same `review` command.", text)
+        self.assertIn("Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.", text)
 
     def test_skill_documents_converter_input_contract(self):
         text = SKILL_MD.read_text(encoding="utf-8")
@@ -123,6 +124,7 @@ class SkillDocumentationContractTest(unittest.TestCase):
             "exit_code",
         ):
             self.assertIn(f"`{field}`", text)
+        self.assertIn("current-login pending review count", text)
 
     def test_readme_defers_advanced_dispatch_details_until_after_first_read_contract(self):
         text = README_MD.read_text(encoding="utf-8")
@@ -165,3 +167,4 @@ class SkillDocumentationContractTest(unittest.TestCase):
         )
         self.assertIn("For explicit automation or repository-root invocation, the main command is:", readme_text)
         self.assertIn("`findings --sync` requires an explicit `--source`", readme_text)
+        self.assertIn("outdated / `STALE` GitHub threads still count as unresolved until explicitly handled", readme_text)

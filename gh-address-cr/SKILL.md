@@ -160,6 +160,7 @@ Advanced producer and dispatch details live in:
 - Never output "done", "all resolved", "completed", or equivalent unless:
   - `python3 scripts/cli.py final-gate <owner/repo> <pr_number>` has just passed, and
   - output includes `Verified: 0 Unresolved Threads found`, and
+  - output includes `Verified: 0 Pending Reviews found`, and
   - session blocking item count is zero.
 - If gate fails, continue iteration; completion summary is forbidden.
 
@@ -173,9 +174,10 @@ Advanced producer and dispatch details live in:
 2. Use the internal low-level dispatch only when the high-level entrypoints do not fit.
 3. Process only unresolved GitHub threads and open local findings.
 4. For GitHub review threads, reply and resolve are both mandatory.
-5. For local findings, terminal handling must include a note.
-6. `producer=code-review` must emit findings JSON before session handling starts.
-7. Never declare completion before `python3 scripts/cli.py final-gate` passes.
+5. Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.
+6. For local findings, terminal handling must include a note.
+7. `producer=code-review` must emit findings JSON before session handling starts.
+8. Never declare completion before `python3 scripts/cli.py final-gate` passes.
 
 ## Automatic Iteration
 

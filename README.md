@@ -466,6 +466,7 @@ The implementation model is now:
 - `python3 gh-address-cr/scripts/cli.py final-gate` evaluates both:
   - session blocking item count
   - unresolved GitHub thread count
+  - current-login pending review count
 
 The session state is stored in a PR-scoped workspace under the user cache directory:
 
@@ -753,6 +754,7 @@ python3 gh-address-cr/scripts/cli.py final-gate --auto-clean --audit-id run-2026
 Rules:
 
 - GitHub thread items require both `python3 gh-address-cr/scripts/cli.py post-reply` and `python3 gh-address-cr/scripts/cli.py resolve-thread`
+- outdated / `STALE` GitHub threads still count as unresolved until explicitly handled
 - `python3 gh-address-cr/scripts/cli.py final-gate` must pass before completion
 
 ### Mode 2: GitHub Thread Clarify / Defer

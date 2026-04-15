@@ -94,6 +94,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'tester'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
@@ -561,6 +565,10 @@ if args[:2] == ['api', 'graphql']:
             }}
         }}
     }}))
+elif args[:2] == ['api', 'user']:
+    print(json.dumps({{'login': 'tester'}}))
+elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {{args}}')
 """,
@@ -1170,7 +1178,7 @@ if args[:2] == ['api', 'graphql']:
     }}))
 elif args[:2] == ['api', 'user']:
     print(json.dumps({{'login': 'tester'}}))
-elif args[:2] == ['api', f'repos/{self.repo}/pulls/{self.pr}/reviews']:
+elif len(args) >= 2 and args[0] == 'api' and args[1].startswith(f'repos/{self.repo}/pulls/{self.pr}/reviews'):
     print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {{args}}')

@@ -87,6 +87,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
@@ -142,6 +146,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
@@ -186,6 +194,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
@@ -288,6 +300,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
@@ -331,6 +347,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
@@ -367,6 +387,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
@@ -476,6 +500,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
@@ -517,6 +545,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
@@ -610,6 +642,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
@@ -673,6 +709,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
@@ -1029,6 +1069,10 @@ if args[:2] == ['api', 'graphql']:
             }}
         }}
     }}))
+elif args[:2] == ['api', 'user']:
+    print(json.dumps({{'login': 'agent-login'}}))
+elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {{args}}')
 """,
@@ -1819,7 +1863,9 @@ else:
 import json
 import sys
 
-if sys.argv[1:3] == ['api', 'graphql']:
+args = sys.argv[1:]
+
+if args[:2] == ['api', 'graphql']:
     print(json.dumps({
         'data': {
             'repository': {
@@ -1840,8 +1886,12 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif args[:2] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
-    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+    raise SystemExit(f'unhandled gh args: {args}')
 """,
             encoding="utf-8",
         )
@@ -1850,6 +1900,58 @@ else:
         result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "gate-test", self.repo, self.pr])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Verified: 0 Unresolved Threads found", result.stdout)
+        self.assertIn("Verified: 0 Pending Reviews found", result.stdout)
+
+    def test_final_gate_python_fails_when_current_login_has_pending_reviews(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            f"""#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+if args[:2] == ['api', 'graphql']:
+    print(json.dumps({{
+        'data': {{
+            'repository': {{
+                'pullRequest': {{
+                    'reviewThreads': {{
+                        'pageInfo': {{'hasNextPage': False, 'endCursor': None}},
+                        'nodes': [{{
+                            'id': 'THREAD_DONE',
+                            'isResolved': True,
+                            'isOutdated': False,
+                            'path': 'src/a.py',
+                            'line': 4,
+                            'firstComment': {{'nodes': [{{'url': 'https://example.test/thread/done', 'body': 'Done'}}]}},
+                            'latestComment': {{'nodes': [{{'url': 'https://example.test/thread/done', 'body': 'Done'}}]}},
+                        }}]
+                    }}
+                }}
+            }}
+        }}
+    }}))
+elif args[:2] == ['api', 'user']:
+    print(json.dumps({{'login': 'agent-login'}}))
+elif args[:2] == ['api', 'repos/{self.repo}/pulls/{self.pr}/reviews?per_page=100&page=1']:
+    print(json.dumps([{{
+        'state': 'PENDING',
+        'node_id': 'PENDING_REVIEW_1',
+        'user': {{'login': 'agent-login'}},
+    }}]))
+elif args[:2] == ['api', 'repos/{self.repo}/pulls/{self.pr}/reviews?per_page=100&page=2']:
+    print('[]')
+else:
+    raise SystemExit(f'unhandled gh args: {{args}}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", self.repo, self.pr])
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Pending review count: 1", result.stdout)
+        self.assertIn("pending review(s)", result.stderr)
 
     def test_list_threads_python_outputs_normalized_rows(self):
         gh = self.bin_dir / "gh"
@@ -2133,6 +2235,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,
@@ -2186,6 +2292,10 @@ if sys.argv[1:3] == ['api', 'graphql']:
             }
         }
     }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
 else:
     raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
 """,

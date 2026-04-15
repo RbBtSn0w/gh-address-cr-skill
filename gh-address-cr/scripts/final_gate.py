@@ -6,7 +6,18 @@ import shutil
 import sys
 from pathlib import Path
 
-from python_common import audit_event, audit_summary_file, copy_threads_snapshot, refresh_threads_snapshot, session_engine, sha256_of_file, snapshot_file, workspace_dir
+from python_common import (
+    audit_event,
+    audit_summary_file,
+    copy_threads_snapshot,
+    github_viewer_login,
+    list_pending_review_ids,
+    refresh_threads_snapshot,
+    session_engine,
+    sha256_of_file,
+    snapshot_file,
+    workspace_dir,
+)
 
 
 def main() -> int:
@@ -49,16 +60,22 @@ def main() -> int:
     blocking_count = int(data.get("blocking_items_count", "0"))
     summary_from_engine = data.get("audit_summary")
     summary_hash = data.get("audit_summary_sha256")
+    login = github_viewer_login()
+    pending_review_ids = sorted(list_pending_review_ids(args.repo, args.pr_number, login))
+    pending_review_count = len(pending_review_ids)
 
     print("== Final Freshness Check ==")
     print(f"Unresolved thread count: {unresolved_count}")
+    print(f"Pending review count: {pending_review_count}")
 
-    if gate.returncode != 0:
+    if gate.returncode != 0 or pending_review_count:
         failure_reasons = []
         if unresolved_count:
             failure_reasons.append(f"{unresolved_count} unresolved thread(s)")
         if blocking_count:
             failure_reasons.append(f"{blocking_count} blocking item(s)")
+        if pending_review_count:
+            failure_reasons.append(f"{pending_review_count} pending review(s)")
         if not failure_reasons:
             failure_reasons.append("gate checks reported failure")
         failure_message = f"Gate failed; {' and '.join(failure_reasons)} remain"
@@ -76,6 +93,8 @@ def main() -> int:
         if not summary_hash and summary.exists():
             summary_hash = sha256_of_file(summary)
         print(gate_output.rstrip())
+        if pending_review_ids:
+            print(f"Pending review ids: {', '.join(pending_review_ids)}")
         print(f"Audit summary: {summary}")
         print(f"Audit summary sha256: {summary_hash}")
         audit_event(
@@ -85,17 +104,20 @@ def main() -> int:
             args.pr_number,
             args.audit_id,
             failure_message,
-            {
-                "unresolved_count": unresolved_count,
-                "blocking_count": blocking_count,
-                "summary_file": str(summary),
-                "summary_sha256": summary_hash,
-            },
+                {
+                    "unresolved_count": unresolved_count,
+                    "blocking_count": blocking_count,
+                    "pending_review_count": pending_review_count,
+                    "pending_review_ids": pending_review_ids,
+                    "summary_file": str(summary),
+                    "summary_sha256": summary_hash,
+                },
         )
-        print("\nGate FAILED: blocking session items remain. Do not send completion summary.", file=sys.stderr)
+        print(f"\nGate FAILED: {failure_message}. Do not send completion summary.", file=sys.stderr)
         return 3
 
     print("Verified: 0 Unresolved Threads found")
+    print("Verified: 0 Pending Reviews found")
     if summary_from_engine and summary_from_engine != str(summary):
         summary.write_text(Path(summary_from_engine).read_text(encoding="utf-8"), encoding="utf-8")
     if not summary_hash and summary.exists():
@@ -113,6 +135,7 @@ def main() -> int:
         {
             "unresolved_count": 0,
             "blocking_count": 0,
+            "pending_review_count": 0,
             "summary_file": str(summary),
             "summary_sha256": summary_hash,
         },
