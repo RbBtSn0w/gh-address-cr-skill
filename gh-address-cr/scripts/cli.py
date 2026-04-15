@@ -2,6 +2,7 @@
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +39,8 @@ COMMAND_TO_SCRIPT = {
 
 HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter"}
 OUTPUT_FLAGS = {"--machine", "--human"}
+HIGH_LEVEL_GH_COMMANDS = {"review", "threads", "adapter"}
+INPUT_REQUIRED_COMMANDS = {"review", "findings"}
 
 
 def normalize_output_args(args: argparse.Namespace) -> bool:
@@ -162,12 +165,40 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
     item = items.get(item_id, {}) if item_id else {}
     item_kind = item.get("item_kind") if isinstance(item, dict) else None
     artifact_path = extract_artifact_path(str(loop_state.get("last_error") or "")) or str(workspace_root(repo, pr_number))
-    next_action = {
-        "PASSED": "No action required.",
-        "NEEDS_HUMAN": f"Inspect {artifact_path} and resolve manually.",
-        "BLOCKED": f"Address the finding in {artifact_path} and rerun {command}.",
-        "FAILED": "Inspect stderr and fix the failing command or input.",
-    }.get(status, "Continue processing the current PR session.")
+    stderr_text = result.stderr or ""
+    last_error = str(loop_state.get("last_error") or "")
+    combined_error = "\n".join(part for part in [last_error, stderr_text] if part)
+
+    reason_code = "COMMAND_FAILED"
+    waiting_on = None
+    next_action = "Inspect stderr and fix the failing command or input."
+    if status == "PASSED":
+        reason_code = "PASSED"
+        next_action = "No action required."
+    elif "requires findings JSON" in combined_error or "requires findings input" in combined_error:
+        reason_code = "MISSING_FINDINGS_INPUT"
+        waiting_on = "findings_input"
+        next_action = f"Provide findings JSON with `python3 gh-address-cr/scripts/cli.py {command} {repo} {pr_number} --input <path>|-`."
+    elif "Missing GitHub CLI" in combined_error or "gh executable" in combined_error:
+        reason_code = "MISSING_GH_CLI"
+        waiting_on = "github_cli"
+        next_action = "Install GitHub CLI and ensure `gh` is available on PATH, then rerun the command."
+    elif status == "NEEDS_HUMAN":
+        reason_code = "NEEDS_HUMAN_REVIEW"
+        waiting_on = "human_review"
+        next_action = f"Inspect {artifact_path} and resolve manually."
+    elif status == "BLOCKED" and ("Internal fixer action required:" in combined_error or "Interaction Required" in combined_error):
+        reason_code = "WAITING_FOR_FIX"
+        waiting_on = "human_fix"
+        next_action = f"Address the finding in {artifact_path} and rerun {command}."
+    elif status == "BLOCKED":
+        reason_code = "BLOCKED"
+        waiting_on = "manual_intervention"
+        next_action = f"Inspect {artifact_path} and rerun {command} after fixing the blocking issue."
+    elif "Gate FAILED" in combined_error:
+        reason_code = "BLOCKING_ITEMS_REMAIN"
+        waiting_on = "unresolved_items"
+        next_action = "Continue processing unresolved items until the final gate passes."
 
     return {
         "status": status,
@@ -182,9 +213,100 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
             "needs_human_items_count": metrics.get("needs_human_items_count", 0),
         },
         "artifact_path": artifact_path,
+        "reason_code": reason_code,
+        "waiting_on": waiting_on,
         "next_action": next_action,
         "exit_code": result.returncode,
     }
+
+
+def build_preflight_summary(
+    command: str,
+    repo: str,
+    pr_number: str,
+    *,
+    exit_code: int,
+    reason_code: str,
+    waiting_on: str | None,
+    next_action: str,
+) -> dict:
+    return {
+        "status": "FAILED",
+        "repo": repo,
+        "pr_number": pr_number,
+        "item_id": None,
+        "item_kind": None,
+        "counts": {
+            "blocking_items_count": 0,
+            "open_local_findings_count": 0,
+            "unresolved_github_threads_count": 0,
+            "needs_human_items_count": 0,
+        },
+        "artifact_path": str(workspace_root(repo, pr_number)),
+        "reason_code": reason_code,
+        "waiting_on": waiting_on,
+        "next_action": next_action,
+        "exit_code": exit_code,
+    }
+
+
+def has_option(args: list[str], flag: str) -> bool:
+    return flag in args
+
+
+def output_preflight_error(args: argparse.Namespace, repo: str, pr_number: str, message: str, *, reason_code: str, waiting_on: str | None, next_action: str, exit_code: int = 2) -> int:
+    if not args.human:
+        summary = build_preflight_summary(
+            args.command,
+            repo,
+            pr_number,
+            exit_code=exit_code,
+            reason_code=reason_code,
+            waiting_on=waiting_on,
+            next_action=next_action,
+        )
+        sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    print(message, file=sys.stderr)
+    return exit_code
+
+
+def preflight_high_level(args: argparse.Namespace) -> int | None:
+    repo = args.args[0]
+    pr_number = args.args[1]
+
+    if args.command in INPUT_REQUIRED_COMMANDS and not has_option(args.args, "--input"):
+        return output_preflight_error(
+            args,
+            repo,
+            pr_number,
+            f"{args.command} requires findings JSON. Pass --input <path> or --input - and provide findings through stdin.",
+            reason_code="MISSING_FINDINGS_INPUT",
+            waiting_on="findings_input",
+            next_action=f"Provide findings JSON with `python3 gh-address-cr/scripts/cli.py {args.command} {repo} {pr_number} --input <path>|-`.",
+        )
+
+    if args.command == "adapter" and len(args.args) < 3:
+        return output_preflight_error(
+            args,
+            repo,
+            pr_number,
+            "adapter requires <adapter_cmd...> after <owner/repo> <pr_number>.",
+            reason_code="MISSING_ADAPTER_COMMAND",
+            waiting_on="adapter_command",
+            next_action=f"Provide an adapter command after `python3 gh-address-cr/scripts/cli.py adapter {repo} {pr_number}`.",
+        )
+
+    if args.command in HIGH_LEVEL_GH_COMMANDS and shutil.which("gh") is None:
+        return output_preflight_error(
+            args,
+            repo,
+            pr_number,
+            "Missing GitHub CLI `gh` on PATH. Install it or add it to PATH before running this command.",
+            reason_code="MISSING_GH_CLI",
+            waiting_on="github_cli",
+            next_action="Install GitHub CLI and ensure `gh` is available on PATH, then rerun the command.",
+        )
+    return None
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -233,6 +355,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in HIGH_LEVEL_COMMANDS and len(args.args) < 2:
         print("High-level commands require <owner/repo> <pr_number>.", file=sys.stderr)
         return 2
+    if args.command in HIGH_LEVEL_COMMANDS:
+        preflight_rc = preflight_high_level(args)
+        if preflight_rc is not None:
+            return preflight_rc
     target = SCRIPT_DIR / COMMAND_TO_SCRIPT[args.command]
     rewritten_args = rewrite_alias_args(args.command, args.args)
     result = subprocess.run([sys.executable, str(target), *rewritten_args], text=True, capture_output=True)

@@ -25,6 +25,12 @@ Agent-first reading order:
 4. If the upstream tool only prints Markdown review blocks, convert them with `review-to-findings` first.
 5. Then hand the JSON to `gh-address-cr` through the correct entrypoint.
 
+Fail-fast contract:
+
+- `review` and `findings` require findings input explicitly.
+- If `--input` is missing, the CLI fails immediately with a structured error instead of waiting on `stdin`.
+- `review`, `threads`, and `adapter` also fail immediately when `gh` is missing from `PATH`.
+
 `review` is the default orchestrator, but it still needs findings input from one of the paths above.
 High-level entrypoints emit machine-readable JSON summaries by default. Use `--human` when a person needs narrative text. `--machine` remains a compatibility alias.
 

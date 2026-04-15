@@ -27,6 +27,12 @@ Read this skill in this order when you are an AI agent:
 4. If the upstream tool only prints Markdown review blocks, convert them first with `review-to-findings`.
 5. Then invoke the `gh-address-cr` entrypoint that consumes those findings.
 
+Fail-fast rules:
+
+- `review` and `findings` require explicit findings input.
+- If `--input` is missing, the CLI fails immediately instead of waiting on `stdin`.
+- `review`, `threads`, and `adapter` require `gh` on `PATH` and fail immediately when it is missing.
+
 Important:
 
 - `review` is the default end-to-end orchestrator, not a hidden review producer.

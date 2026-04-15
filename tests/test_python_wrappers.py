@@ -91,7 +91,7 @@ else:
         summary = json.loads(result.stdout)
         self.assertEqual(
             set(summary),
-            {"artifact_path", "counts", "exit_code", "item_id", "item_kind", "next_action", "pr_number", "repo", "status"},
+            {"artifact_path", "counts", "exit_code", "item_id", "item_kind", "next_action", "pr_number", "reason_code", "repo", "status", "waiting_on"},
         )
         self.assertEqual(summary["status"], "PASSED")
         self.assertEqual(summary["repo"], self.repo)
@@ -100,6 +100,8 @@ else:
         self.assertEqual(summary["counts"]["blocking_items_count"], 0)
         self.assertIn("pr-77", summary["artifact_path"])
         self.assertEqual(summary["next_action"], "No action required.")
+        self.assertEqual(summary["reason_code"], "PASSED")
+        self.assertIsNone(summary["waiting_on"])
 
     def test_cli_review_human_flag_keeps_human_text(self):
         gh = self.bin_dir / "gh"
@@ -191,14 +193,19 @@ else:
         self.assertEqual(summary["repo"], self.repo)
         self.assertEqual(summary["pr_number"], self.pr)
         self.assertEqual(summary["exit_code"], 0)
+        self.assertEqual(summary["reason_code"], "PASSED")
+        self.assertIsNone(summary["waiting_on"])
 
     def test_cli_review_alias_requires_findings_input(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
         self.assertNotEqual(result.returncode, 0)
         summary = json.loads(result.stdout)
         self.assertEqual(summary["status"], "FAILED")
-        self.assertIn("Inspect stderr", summary["next_action"])
+        self.assertEqual(summary["reason_code"], "MISSING_FINDINGS_INPUT")
+        self.assertEqual(summary["waiting_on"], "findings_input")
+        self.assertIn("--input", summary["next_action"])
         self.assertEqual(summary["repo"], self.repo)
+        self.assertIn("findings JSON", result.stderr)
 
     def test_cli_findings_machine_reports_pause_summary(self):
         payload_file = Path(self.temp_dir.name) / "findings.json"
@@ -234,7 +241,7 @@ else:
         summary = json.loads(result.stdout)
         self.assertEqual(
             set(summary),
-            {"artifact_path", "counts", "exit_code", "item_id", "item_kind", "next_action", "pr_number", "repo", "status"},
+            {"artifact_path", "counts", "exit_code", "item_id", "item_kind", "next_action", "pr_number", "reason_code", "repo", "status", "waiting_on"},
         )
         self.assertEqual(summary["status"], "BLOCKED")
         self.assertEqual(summary["repo"], self.repo)
@@ -245,6 +252,8 @@ else:
         self.assertTrue(summary["item_id"].startswith("local-finding:"))
         self.assertIn("loop-request-", summary["artifact_path"])
         self.assertIn("Address the finding", summary["next_action"])
+        self.assertEqual(summary["reason_code"], "WAITING_FOR_FIX")
+        self.assertEqual(summary["waiting_on"], "human_fix")
 
     def test_cli_threads_defaults_to_structured_summary(self):
         gh = self.bin_dir / "gh"
@@ -284,6 +293,8 @@ else:
         self.assertEqual(summary["item_kind"], None)
         self.assertEqual(summary["next_action"], "No action required.")
         self.assertEqual(summary["counts"]["blocking_items_count"], 0)
+        self.assertEqual(summary["reason_code"], "PASSED")
+        self.assertIsNone(summary["waiting_on"])
 
     def test_cli_threads_machine_emits_pass_summary(self):
         gh = self.bin_dir / "gh"
@@ -323,6 +334,8 @@ else:
         self.assertEqual(summary["item_kind"], None)
         self.assertEqual(summary["next_action"], "No action required.")
         self.assertEqual(summary["counts"]["blocking_items_count"], 0)
+        self.assertEqual(summary["reason_code"], "PASSED")
+        self.assertIsNone(summary["waiting_on"])
 
     def test_cli_findings_defaults_to_structured_summary(self):
         payload_file = Path(self.temp_dir.name) / "findings.json"
@@ -360,6 +373,17 @@ else:
         self.assertEqual(summary["item_kind"], "local_finding")
         self.assertTrue(summary["item_id"].startswith("local-finding:"))
         self.assertIn("Address the finding", summary["next_action"])
+        self.assertEqual(summary["reason_code"], "WAITING_FOR_FIX")
+        self.assertEqual(summary["waiting_on"], "human_fix")
+
+    def test_cli_findings_alias_requires_findings_input(self):
+        result = self.run_cmd([sys.executable, str(CLI_PY), "findings", self.repo, self.pr])
+        self.assertNotEqual(result.returncode, 0)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "FAILED")
+        self.assertEqual(summary["reason_code"], "MISSING_FINDINGS_INPUT")
+        self.assertEqual(summary["waiting_on"], "findings_input")
+        self.assertIn("--input", summary["next_action"])
 
     def test_cli_adapter_defaults_to_structured_summary(self):
         adapter = Path(self.temp_dir.name) / "adapter.py"
@@ -411,6 +435,29 @@ else:
         self.assertEqual(summary["item_id"], None)
         self.assertEqual(summary["item_kind"], None)
         self.assertEqual(summary["next_action"], "No action required.")
+        self.assertEqual(summary["reason_code"], "PASSED")
+        self.assertIsNone(summary["waiting_on"])
+
+    def test_cli_review_fails_fast_when_gh_is_missing(self):
+        self.env["PATH"] = str(self.bin_dir)
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(CLI_PY),
+                "review",
+                self.repo,
+                self.pr,
+                "--input",
+                "-",
+            ],
+            stdin="[]",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["status"], "FAILED")
+        self.assertEqual(summary["reason_code"], "MISSING_GH_CLI")
+        self.assertEqual(summary["waiting_on"], "github_cli")
+        self.assertIn("gh", result.stderr)
 
     def test_run_local_review_requires_explicit_source_for_sync(self):
         adapter = Path(self.temp_dir.name) / "adapter.py"

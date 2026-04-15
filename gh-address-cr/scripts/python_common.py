@@ -128,7 +128,12 @@ def is_transient_gh_failure(stderr: str | None = None, stdout: str | None = None
 
 def run_cmd(cmd: list[str], *, input_text: str | None = None, check: bool = False, retries: int = 1) -> subprocess.CompletedProcess:
     _ = retries
-    return subprocess.run(cmd, input=input_text, text=True, capture_output=True, check=check)
+    try:
+        return subprocess.run(cmd, input=input_text, text=True, capture_output=True, check=check)
+    except FileNotFoundError as exc:
+        if cmd and cmd[0] == "gh":
+            raise SystemExit("Missing GitHub CLI `gh` on PATH. Install it or add it to PATH before running this command.") from exc
+        raise
 
 
 def gh_read_cmd(
@@ -151,6 +156,10 @@ def gh_read_cmd(
             if cmd and cmd[0] == "gh" and attempt < attempts - 1 and is_transient_gh_failure(exc.stderr, exc.stdout, exc.returncode):
                 time.sleep(2**attempt)
                 continue
+            raise
+        except FileNotFoundError as exc:
+            if cmd and cmd[0] == "gh":
+                raise SystemExit("Missing GitHub CLI `gh` on PATH. Install it or add it to PATH before running this command.") from exc
             raise
     raise AssertionError("gh_read_cmd exhausted without returning a result")
 
