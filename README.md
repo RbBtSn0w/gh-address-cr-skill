@@ -96,12 +96,14 @@ High-level entrypoints:
 - `review`
   - default entrypoint
   - runs the full PR review workflow automatically once findings are supplied
+  - handles both local findings and GitHub review threads in one run
   - emits a machine-readable JSON summary by default
 - `threads`
   - GitHub review threads only
   - emits a machine-readable JSON summary by default
 - `findings`
   - existing findings JSON only
+  - handles local findings only; it does not process GitHub review threads
   - emits a machine-readable JSON summary by default
 - `adapter`
   - adapter-produced findings plus PR orchestration, including GitHub thread handling
@@ -156,10 +158,12 @@ When `gh-address-cr` is the main entrypoint:
 ```text
 使用 $gh-address-cr 处理这个 PR：<PR_URL>
 
+如果你要同时处理 GitHub review threads 和 local findings，请使用 `review` 入口。
+如果你只想接管 local findings JSON，请使用 `findings` 入口。
 先让上游 review producer 输出 findings JSON，不要只给 Markdown。
 如果上游只会输出固定格式的 `finding` blocks，先用 `review-to-findings` 转成 findings JSON。
 如果 findings 是当前步骤现产出的，优先通过 stdin 传入；只有在已经存在真实 JSON 文件时才使用 --input <path>。
-然后由 $gh-address-cr 接管 session、GitHub threads 和 final-gate，直到通过。
+然后由 $gh-address-cr 接管 session、GitHub threads（如果你选择的是 `review`）和 final-gate，直到通过。
 如果你要刷新本地 findings 并自动关闭消失的旧项，再加 `--sync`。
 ```
 
@@ -168,7 +172,9 @@ When the upstream review command must run first and `gh-address-cr` can only com
 ```text
 先运行 <review-command> 审查这个 PR：<PR_URL>，并输出 findings JSON，不要只给 Markdown。
 如果该命令只输出固定格式的 `finding` blocks，先用 `review-to-findings` 转成 findings JSON。
-然后把这些 findings 交给 $gh-address-cr，使用 `findings` 入口接管 JSON 文件，或使用 `review` 入口接管当前步骤的 stdin。
+然后把这些 findings 交给 $gh-address-cr：
+- 如果你只想处理 local findings JSON，用 `findings`。
+- 如果你要同时处理 local findings 和 GitHub review threads，用 `review`。
 如果 findings 已经是现成文件，用 --input <path>；如果是当前步骤现产出的，优先用 --input - 通过 stdin 传入。
 如果你想刷新同一来源的 findings 并自动关闭消失项，再加 `--sync`。
 最后由 $gh-address-cr 负责 intake、session、reply/resolve 和 final-gate。

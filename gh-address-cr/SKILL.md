@@ -49,10 +49,12 @@ Recommended high-level entrypoints:
 - `review`
   - default entrypoint
   - runs the full PR review workflow automatically once findings are supplied
+  - handles both local findings and GitHub review threads in one run
 - `threads`
   - GitHub review threads only
 - `findings`
   - existing findings JSON only
+  - handles local findings only; it does not process GitHub review threads
 - `adapter`
   - adapter-produced findings plus PR orchestration
 - `review-to-findings`
@@ -219,6 +221,8 @@ When `gh-address-cr` is the main entrypoint, prefer:
 ```text
 $gh-address-cr review <PR_URL> --input -
 
+Use `review` when you want both local findings and GitHub review threads handled in one run.
+Use `findings` only when you want to ingest/process local findings JSON without GitHub thread handling.
 Use the upstream review producer to emit findings JSON first, then let $gh-address-cr ingest, process, and gate the PR session.
 If the upstream tool emits fixed-format `finding` blocks, convert them first with `review-to-findings`, then feed the resulting JSON to `gh-address-cr`.
 If the findings are produced in the current step, prefer `--input -` and stdin.
@@ -229,7 +233,9 @@ When an external review command must run first and `gh-address-cr` can only come
 ```text
 First run <review-command> on <PR_URL> and emit findings JSON, not Markdown only.
 If the command only emits fixed-format `finding` blocks, convert them first with `review-to-findings`.
-Then hand the findings to $gh-address-cr using `findings` or `review`, depending on whether the input is already a JSON file.
+Then hand the findings to $gh-address-cr:
+- use `findings` when you only want to process local findings JSON
+- use `review` when you want both local findings and GitHub review threads
 Use --input <path> only for an already-existing JSON file; otherwise prefer --input - with stdin.
 Add `--sync` when you want missing findings from the same source to auto-close on refresh.
 ```

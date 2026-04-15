@@ -43,6 +43,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertNotIn("Advanced dispatch model:", text)
         self.assertIn("references/mode-producer-matrix.md", text)
         self.assertIn("adapter-produced findings plus PR orchestration", text)
+        self.assertIn("handles both local findings and GitHub review threads in one run", text)
+        self.assertIn("handles local findings only; it does not process GitHub review threads", text)
 
     def test_readme_examples_do_not_show_bare_review_entrypoint(self):
         text = README_MD.read_text(encoding="utf-8")
@@ -57,6 +59,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertNotIn("adapter command prints findings JSON", text)
         self.assertIn("wrapper `--human` and `--machine` belong before `adapter`", text)
         self.assertIn("passed through to the adapter command unchanged", text)
+        self.assertIn("handles both local findings and GitHub review threads in one run", text)
+        self.assertIn("handles local findings only; it does not process GitHub review threads", text)
 
     def test_readme_documents_converter_input_contract(self):
         text = README_MD.read_text(encoding="utf-8")
@@ -98,3 +102,11 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine", text)
         self.assertIn("python3 gh-address-cr/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py", text)
         self.assertIn("python3 gh-address-cr/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py --base main --human", text)
+
+    def test_prompt_patterns_distinguish_review_vs_findings_scope(self):
+        readme_text = README_MD.read_text(encoding="utf-8")
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        self.assertIn("如果你要同时处理 GitHub review threads 和 local findings，请使用 `review` 入口。", readme_text)
+        self.assertIn("如果你只想接管 local findings JSON，请使用 `findings` 入口。", readme_text)
+        self.assertIn("use `findings` when you only want to process local findings JSON", skill_text)
+        self.assertIn("use `review` when you want both local findings and GitHub review threads", skill_text)
