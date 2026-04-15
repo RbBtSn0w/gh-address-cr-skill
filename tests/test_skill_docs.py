@@ -45,7 +45,15 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("public main entrypoint", text)
         self.assertIn("advanced/internal", text)
         self.assertNotIn("## Prompt Patterns", text)
-        self.assertIn("README.md", text)
+        self.assertIn("../README.md", text)
+
+    def test_skill_paths_are_relative_to_skill_root(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        self.assertNotIn("gh-address-cr/scripts/", text)
+        self.assertNotIn("gh-address-cr/references/", text)
+        self.assertIn("python3 scripts/cli.py review <owner/repo> <pr_number>", text)
+        self.assertIn("python3 scripts/cli.py final-gate <owner/repo> <pr_number>", text)
+        self.assertIn("../README.md", text)
 
     def test_readme_examples_use_single_review_main_entrypoint(self):
         text = README_MD.read_text(encoding="utf-8")
