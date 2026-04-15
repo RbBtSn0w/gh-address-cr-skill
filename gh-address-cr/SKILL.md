@@ -14,7 +14,7 @@ Treat this `SKILL.md` as rooted at the `gh-address-cr/` directory.
 
 - Use `python3 scripts/cli.py ...` for commands shown inside this skill.
 - Do not prepend `gh-address-cr/` to paths that already live inside this skill directory.
-- Use `../README.md` when you need the repo-root human-readable guide.
+- Use `references/*.md` when you need supplemental guidance beyond this contract.
 
 ## Usage
 
@@ -116,8 +116,8 @@ High-level commands emit structured JSON by default. Agents should consume these
 
 - Dispatch details: `references/mode-producer-matrix.md`
 - Review triage checklist: `references/cr-triage-checklist.md`
+- Operator walkthrough: `references/newcomer-playbook.md`
 - Low-level scripts are implementation details, not the public agent surface.
-- Human-readable prompt and handoff examples live in `../README.md`.
 
 Examples that require advanced dispatch details live in the reference docs instead of the first-read contract.
 
