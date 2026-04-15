@@ -112,10 +112,11 @@ def alias_help(command: str) -> str:
         )
     if command == "findings":
         return (
-            "usage: cli.py findings <owner/repo> <pr_number> --input <path>|- [--human|--machine]\n\n"
+            "usage: cli.py findings <owner/repo> <pr_number> --input <path>|- [--source <producer_id>] [--sync] [--human|--machine]\n\n"
             "High-level local findings entrypoint.\n\n"
             "Use when findings already exist as JSON or are piped in through stdin.\n"
             "Missing --input fails immediately instead of waiting on stdin.\n"
+            "`--sync` requires --source so auto-closing stays scoped to one producer.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
             "--machine remains a compatibility alias for the default machine summary.\n"
         )
@@ -332,10 +333,10 @@ def build_preflight_summary(
         "item_id": None,
         "item_kind": None,
         "counts": {
-            "blocking_items_count": 0,
-            "open_local_findings_count": 0,
-            "unresolved_github_threads_count": 0,
-            "needs_human_items_count": 0,
+            "blocking_items_count": None,
+            "open_local_findings_count": None,
+            "unresolved_github_threads_count": None,
+            "needs_human_items_count": None,
         },
         "artifact_path": artifact_path or str(workspace_root(repo, pr_number)),
         "reason_code": reason_code,

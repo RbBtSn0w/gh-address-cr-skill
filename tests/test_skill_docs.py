@@ -23,6 +23,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertNotIn("/gh-address-cr review <owner/repo> <pr_number> --input <path>|-", text)
         self.assertIn("$gh-address-cr review <PR_URL>", text)
         self.assertNotIn("$gh-address-cr review <PR_URL> --input findings.json", text)
+        self.assertIn("If `review` returns `BLOCKED`, inspect the loop request artifact,", text)
+        self.assertIn("then rerun the same `review` command.", text)
 
     def test_skill_documents_converter_input_contract(self):
         text = SKILL_MD.read_text(encoding="utf-8")
@@ -157,3 +159,4 @@ class SkillDocumentationContractTest(unittest.TestCase):
             readme_text,
         )
         self.assertIn("For explicit automation or repository-root invocation, the main command is:", readme_text)
+        self.assertIn("`findings --sync` requires an explicit `--source`", readme_text)

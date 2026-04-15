@@ -65,6 +65,7 @@ Stable machine summary fields:
 - `exit_code`
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
+`counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
 
 Main entrypoint examples:
 
@@ -135,6 +136,9 @@ $gh-address-cr review <PR_URL>
 // After any external review producer fills a handoff file, rerun the same command
 $gh-address-cr review <PR_URL>
 
+// If review returns BLOCKED, inspect loop-request-*.json, apply fix/clarify/defer,
+// then rerun the same review command
+
 // Adapter wrapper output flag comes before `adapter`
 python3 gh-address-cr/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py
 
@@ -199,6 +203,8 @@ Do not stretch the PR just to silence a thread. If the item is valid but not app
 
 The public user flow above does not require manual `--input`, producer selection, or mode routing.
 The following commands remain available for explicit integrations, repository-root automation, and debugging.
+
+`findings --sync` requires an explicit `--source` so missing local findings stay scoped to one producer.
 
 For explicit automation or repository-root invocation, the main command is:
 

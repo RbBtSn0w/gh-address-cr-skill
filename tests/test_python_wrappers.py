@@ -231,9 +231,19 @@ else:
         request_path = Path(summary["artifact_path"])
         self.assertTrue(request_path.exists())
         self.assertEqual(request_path.name, "producer-request.md")
+        self.assertIsNone(summary["counts"]["unresolved_github_threads_count"])
+        self.assertIsNone(summary["counts"]["blocking_items_count"])
         self.assertTrue((self.workspace_dir() / "incoming-findings.json").exists())
         self.assertTrue((self.workspace_dir() / "incoming-findings.md").exists())
         self.assertIn("external review producer", result.stderr)
+
+    def test_cli_findings_help_mentions_source_required_for_sync(self):
+        result = self.run_cmd([sys.executable, str(CLI_PY), "findings", "--help"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("usage: cli.py findings", result.stdout)
+        self.assertIn("--source <producer_id>", result.stdout)
+        self.assertIn("--sync", result.stdout)
+        self.assertIn("requires --source", result.stdout)
 
     def test_cli_review_accepts_pr_url_target(self):
         gh = self.bin_dir / "gh"

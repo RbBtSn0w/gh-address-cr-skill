@@ -38,7 +38,8 @@ Read this skill in this order when you are an AI agent:
    - `incoming-findings.json`
    - `incoming-findings.md`
 3. Rerun the same `review` command. It will auto-consume findings JSON or fixed `finding` blocks and continue orchestration.
-4. Use `threads`, `findings`, `adapter`, and `review-to-findings` only as advanced/internal integration surfaces.
+4. If `review` returns `BLOCKED`, inspect the loop request artifact, apply `fix`, `clarify`, or `defer`, then rerun the same `review` command.
+5. Use `threads`, `findings`, `adapter`, and `review-to-findings` only as advanced/internal integration surfaces.
 
 Fail-fast rules:
 
@@ -114,6 +115,7 @@ High-level commands emit structured JSON by default. Agents should consume these
 - `exit_code`
 
 `reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
+`counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
 
 ## Advanced References
 
