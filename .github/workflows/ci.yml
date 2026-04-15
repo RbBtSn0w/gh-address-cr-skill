@@ -36,7 +36,12 @@ jobs:
         run: python -m unittest discover -s tests
 
       - name: Shell syntax
-        run: bash -n gh-address-cr/scripts/*.sh
+        run: |
+          shopt -s nullglob
+          sh_files=(gh-address-cr/scripts/*.sh)
+          if (( ${#sh_files[@]} > 0 )); then
+            bash -n "${sh_files[@]}"
+          fi
 
       - name: CLI smoke
         run: |
