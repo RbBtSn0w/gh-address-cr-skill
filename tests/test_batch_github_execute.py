@@ -76,7 +76,7 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
 
         module.list_pending_review_ids = fake_list_pending_review_ids
         module.submit_pending_reviews_result = fake_submit_pending_reviews_result
-        module.current_login = lambda: "tester"
+        module.github_viewer_login = lambda: "tester"
         module.gh_write_cmd = fake_write_cmd
         module.audit_event = lambda *args, **kwargs: None
 
@@ -124,7 +124,7 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
 
         module.list_pending_review_ids = fake_list_pending_review_ids
         module.submit_pending_reviews_result = fake_submit_pending_reviews_result
-        module.current_login = lambda: "tester"
+        module.github_viewer_login = lambda: "tester"
         module.gh_write_cmd = fake_write_cmd
         module.is_transient_gh_failure = lambda *_args, **_kwargs: True
         module.audit_event = lambda *args, **kwargs: None
@@ -163,7 +163,7 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
 
         module.list_pending_review_ids = lambda *_args, **_kwargs: set()
         module.submit_pending_reviews_result = lambda *_args, **_kwargs: {"status": "skipped", "submitted": submitted, "error": None}
-        module.current_login = lambda: "tester"
+        module.github_viewer_login = lambda: "tester"
         module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("gh_write_cmd should not be called"))
         module.audit_event = lambda *args, **kwargs: audit_calls.append((args, kwargs))
 
@@ -204,7 +204,7 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
             "submitted": [],
             "error": "submit pending reviews failed",
         }
-        module.current_login = lambda: "tester"
+        module.github_viewer_login = lambda: "tester"
         module.gh_write_cmd = lambda cmd, *, input_text=None, check=False: subprocess.CompletedProcess(
             cmd,
             0,
@@ -262,7 +262,7 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
             "submitted": [11],
             "error": None,
         }
-        module.current_login = lambda: "tester"
+        module.github_viewer_login = lambda: "tester"
         module.gh_write_cmd = lambda cmd, *, input_text=None, check=False: subprocess.CompletedProcess(
             cmd,
             0,
@@ -319,7 +319,7 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
             "submitted": [],
             "error": None,
         }
-        module.current_login = lambda: "tester"
+        module.github_viewer_login = lambda: "tester"
         module.audit_event = lambda *args, **kwargs: None
 
         def fake_write_cmd(cmd, *, input_text=None, check=False):
