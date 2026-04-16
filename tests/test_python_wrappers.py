@@ -417,6 +417,86 @@ body: Potential null dereference.
         self.assertEqual(summary["reason_code"], "WAITING_FOR_FIX")
         self.assertEqual(summary["item_kind"], "local_finding")
 
+    def test_cli_review_rerun_does_not_reingest_consumed_handoff(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+        self.workspace_dir().mkdir(parents=True, exist_ok=True)
+        (self.workspace_dir() / "incoming-findings.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Missing guard",
+                        "body": "Fix the unsafe access.",
+                        "path": "src/example.py",
+                        "line": 12,
+                        "severity": "P2",
+                        "category": "correctness",
+                    }
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        first = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
+        self.assertEqual(first.returncode, 5, first.stderr)
+        first_summary = json.loads(first.stdout)
+        self.assertEqual(first_summary["status"], "BLOCKED")
+
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        item_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+        resolved = self.run_cmd(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "resolve-local-item",
+                self.repo,
+                self.pr,
+                item_id,
+                "fix",
+                "--note",
+                "Fixed locally before rerunning review.",
+            ]
+        )
+        self.assertEqual(resolved.returncode, 0, resolved.stderr)
+
+        second = self.run_cmd([sys.executable, str(CLI_PY), "review", self.repo, self.pr])
+        self.assertEqual(second.returncode, 0, second.stderr)
+        second_summary = json.loads(second.stdout)
+        self.assertEqual(second_summary["status"], "PASSED")
+
+        session = json.loads(self.session_file().read_text(encoding="utf-8"))
+        item = session["items"][item_id]
+        self.assertEqual(item["status"], "CLOSED")
+        self.assertFalse(item["blocking"])
+
     def test_cli_review_rejects_invalid_handoff_markdown(self):
         gh = self.bin_dir / "gh"
         gh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -1856,6 +1936,46 @@ else:
         second = self.run_cmd([sys.executable, str(RUN_ONCE_PY), self.repo, self.pr])
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertIn("github-thread:THREAD_REOPENED", second.stdout)
+
+    def test_run_once_python_lists_stale_thread_as_unhandled(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': [{
+                            'id': 'THREAD_STALE',
+                            'isResolved': False,
+                            'isOutdated': True,
+                            'path': 'src/stale.py',
+                            'line': 9,
+                            'firstComment': {'nodes': [{'url': 'https://example.test/thread/stale', 'body': 'Still needs handling.'}]},
+                            'latestComment': {'nodes': [{'url': 'https://example.test/thread/stale', 'body': 'Still needs handling.'}]},
+                        }]
+                    }
+                }
+            }
+        }
+    }))
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(RUN_ONCE_PY), self.repo, self.pr])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('"item_id": "github-thread:THREAD_STALE"', result.stdout)
+        self.assertIn('"status": "STALE"', result.stdout)
 
     def test_final_gate_python_passes_on_resolved_threads(self):
         gh = self.bin_dir / "gh"

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -76,8 +77,15 @@ def normalize_output_args(args: argparse.Namespace) -> bool:
     return True
 
 
-def rewrite_alias_args(command: str, passthrough_args: list[str]) -> list[str]:
+def rewrite_alias_args(
+    command: str,
+    passthrough_args: list[str],
+    *,
+    review_continue_without_input: bool = False,
+) -> list[str]:
     if command == "review":
+        if review_continue_without_input:
+            return ["remote", *passthrough_args]
         return ["mixed", "json", *passthrough_args]
     if command == "threads":
         return ["remote", *passthrough_args]
@@ -176,7 +184,20 @@ def ensure_external_review_handoff(repo: str, pr_number: str) -> Path:
     return request_path
 
 
-def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str | None]:
+def canonical_findings_payload(findings: list[dict]) -> str:
+    return json.dumps(findings, sort_keys=True, separators=(",", ":"))
+
+
+def last_consumed_handoff_sha256(repo: str, pr_number: str) -> str | None:
+    session = load_session_payload(repo, pr_number)
+    handoff = session.get("handoff") if isinstance(session, dict) else None
+    if not isinstance(handoff, dict):
+        return None
+    value = handoff.get("last_consumed_sha256")
+    return value if isinstance(value, str) and value else None
+
+
+def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str | None, str | None]:
     incoming_json = incoming_findings_json_file(repo, pr_number)
     incoming_md = incoming_findings_markdown_file(repo, pr_number)
     raw_json = incoming_json.read_text(encoding="utf-8") if incoming_json.exists() else ""
@@ -187,23 +208,27 @@ def normalize_review_handoff(repo: str, pr_number: str) -> tuple[str | None, str
         try:
             findings = [normalize_finding(record) for record in parse_records(raw_json)]
         except SystemExit as exc:
-            return None, str(exc) or "Invalid findings JSON."
+            return None, None, str(exc) or "Invalid findings JSON."
         except Exception as exc:
-            return None, str(exc) or "Invalid findings JSON."
+            return None, None, str(exc) or "Invalid findings JSON."
     elif raw_md.strip():
         try:
             findings = parse_findings(raw_md)
         except SystemExit as exc:
-            return None, str(exc) or "Invalid finding blocks."
+            return None, None, str(exc) or "Invalid finding blocks."
         except Exception as exc:
-            return None, str(exc) or "Invalid finding blocks."
+            return None, None, str(exc) or "Invalid finding blocks."
 
     if findings is None:
-        return None, None
+        return None, None, None
 
     normalized_path = normalized_handoff_findings_file(repo, pr_number)
     normalized_path.write_text(json.dumps(findings, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return str(normalized_path), None
+    return (
+        str(normalized_path),
+        hashlib.sha256(canonical_findings_payload(findings).encode("utf-8")).hexdigest(),
+        None,
+    )
 
 
 def load_session_payload(repo: str, pr_number: str) -> dict:
@@ -424,7 +449,7 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
         )
 
     if args.command == "review" and not has_option(args.args, "--input"):
-        normalized_input, error = normalize_review_handoff(repo, pr_number)
+        normalized_input, handoff_sha256, error = normalize_review_handoff(repo, pr_number)
         if error:
             return output_preflight_error(
                 args,
@@ -439,7 +464,12 @@ def preflight_high_level(args: argparse.Namespace) -> int | None:
                 ),
             )
         if normalized_input:
+            if handoff_sha256 and handoff_sha256 == last_consumed_handoff_sha256(repo, pr_number):
+                args.review_continue_without_input = True
+                return None
             args.args = [*args.args, "--input", normalized_input]
+            if handoff_sha256:
+                args.args.extend(["--handoff-sha256", handoff_sha256])
             return None
         request_path = ensure_external_review_handoff(repo, pr_number)
         return output_preflight_error(
@@ -531,7 +561,11 @@ def main(argv: list[str] | None = None) -> int:
         if preflight_rc is not None:
             return preflight_rc
     target = SCRIPT_DIR / COMMAND_TO_SCRIPT[args.command]
-    rewritten_args = rewrite_alias_args(args.command, args.args)
+    rewritten_args = rewrite_alias_args(
+        args.command,
+        args.args,
+        review_continue_without_input=bool(getattr(args, "review_continue_without_input", False)),
+    )
     result = subprocess.run([sys.executable, str(target), *rewritten_args], text=True, capture_output=True)
     if args.command in HIGH_LEVEL_COMMANDS and not args.human:
         summary = build_machine_summary(args.command, args.args[0], args.args[1], result)

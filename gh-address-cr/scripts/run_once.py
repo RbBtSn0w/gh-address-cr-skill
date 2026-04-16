@@ -46,7 +46,18 @@ def main() -> int:
     title = "== Unresolved Threads (including handled) ==" if args.show_all else "== Unresolved Threads (excluding handled) =="
     print(title)
     list_result = session_engine(
-        ["list-items", args.repo, args.pr_number, "--item-kind", "github_thread", "--status", "OPEN", *(["--unhandled"] if not args.show_all else [])],
+        [
+            "list-items",
+            args.repo,
+            args.pr_number,
+            "--item-kind",
+            "github_thread",
+            "--status",
+            "OPEN",
+            "--status",
+            "STALE",
+            *(["--unhandled"] if not args.show_all else []),
+        ],
         check=True,
     )
     if list_result.stdout.strip():

@@ -134,6 +134,9 @@ def default_session(repo: str, pr_number: str) -> dict:
             "last_started_at": None,
             "last_completed_at": None,
         },
+        "handoff": {
+            "last_consumed_sha256": None,
+        },
         "items": {},
         "history": [],
     }
@@ -149,6 +152,11 @@ def ensure_loop_state(session: dict):
     loop_state.setdefault("last_error", "")
     loop_state.setdefault("last_started_at", None)
     loop_state.setdefault("last_completed_at", None)
+
+
+def ensure_handoff_state(session: dict):
+    handoff = session.setdefault("handoff", {})
+    handoff.setdefault("last_consumed_sha256", None)
 
 
 def current_run_id(session: dict, explicit_run_id: str | None = None) -> str | None:
@@ -185,6 +193,7 @@ def load_session(repo: str, pr_number: str) -> dict:
     if payload.get("schema_version") != SCHEMA_VERSION:
         raise SystemExit(f"Unsupported session schema version: {payload.get('schema_version')}")
     ensure_loop_state(payload)
+    ensure_handoff_state(payload)
     for item in payload.get("items", {}).values():
         ensure_item_runtime_fields(item)
     return payload
@@ -278,6 +287,15 @@ def fingerprint_finding(finding: dict) -> str:
         ]
     )
     return hashlib.sha256(stable.encode("utf-8")).hexdigest()[:16]
+
+
+def local_finding_item_id(source: str, finding: dict) -> str:
+    stable = json.dumps({"source": source, "fingerprint": fingerprint_finding(finding)}, sort_keys=True, separators=(",", ":"))
+    return f"local-finding:{hashlib.sha256(stable.encode('utf-8')).hexdigest()[:16]}"
+
+
+def legacy_local_finding_item_id(finding: dict) -> str:
+    return f"local-finding:{fingerprint_finding(finding)}"
 
 
 def history_event(event: str, note: str = "", actor: str = "system") -> dict:
@@ -391,10 +409,19 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
 
 def add_local_finding(session: dict, finding: dict, source: str) -> tuple[str, bool]:
     fingerprint = fingerprint_finding(finding)
-    item_id = f"local-finding:{fingerprint}"
+    item_id = local_finding_item_id(source, finding)
     now = utc_now()
     run_id = current_run_id(session)
     existing = session["items"].get(item_id)
+    if existing is None:
+        legacy_item_id = legacy_local_finding_item_id(finding)
+        legacy_item = session["items"].get(legacy_item_id)
+        if legacy_item and legacy_item["item_kind"] == "local_finding" and legacy_item.get("source") == source:
+            legacy_item["item_id"] = item_id
+            legacy_item["history"].append(history_event("migrated", "Migrated local finding to source-scoped item id"))
+            session["items"][item_id] = legacy_item
+            del session["items"][legacy_item_id]
+            existing = legacy_item
     if existing:
         existing["last_seen_in_sha"] = finding.get("head_sha") or existing.get("last_seen_in_sha")
         existing["scan_id"] = session.get("current_scan_id")
@@ -560,7 +587,7 @@ def cmd_ingest_local(args):
     findings = [normalize_finding(record) for record in read_records_from_stdin()]
     session["current_scan_id"] = args.scan_id or utc_now()
     run_id = current_run_id(session)
-    incoming_ids = {f"local-finding:{fingerprint_finding(finding)}" for finding in findings}
+    incoming_ids = {local_finding_item_id(args.source, finding) for finding in findings}
     created = 0
     for finding in findings:
         _, was_created = add_local_finding(session, finding, args.source)
@@ -593,6 +620,8 @@ def cmd_ingest_local(args):
             clear_claim(item)
             item["history"].append(history_event("auto-resolved", "Auto-resolved from synchronized findings", actor="ingest-local"))
             synced += 1
+    if args.handoff_sha256:
+        session["handoff"]["last_consumed_sha256"] = args.handoff_sha256
     save_session(session)
     active_local_items = sum(1 for item in session["items"].values() if item["item_kind"] == "local_finding" and item.get("blocking"))
     append_audit_event(
@@ -949,7 +978,7 @@ def cmd_list_items(args):
     if args.item_kind:
         items = [item for item in items if item["item_kind"] == args.item_kind]
     if args.status:
-        items = [item for item in items if item["status"] == args.status]
+        items = [item for item in items if item["status"] in set(args.status)]
     if args.unhandled:
         items = [item for item in items if not item.get("handled")]
     for item in sorted(items, key=lambda row: (row.get("severity", "P9"), row.get("path") or "", row.get("line") or 0)):
@@ -1092,6 +1121,7 @@ def build_parser():
     ingest_local.add_argument("--source", required=True)
     ingest_local.add_argument("--scan-id")
     ingest_local.add_argument("--sync", action="store_true")
+    ingest_local.add_argument("--handoff-sha256", default="")
     ingest_local.set_defaults(func=cmd_ingest_local)
 
     claim = sub.add_parser("claim")
@@ -1131,7 +1161,7 @@ def build_parser():
     list_items.add_argument("repo")
     list_items.add_argument("pr_number")
     list_items.add_argument("--item-kind")
-    list_items.add_argument("--status")
+    list_items.add_argument("--status", action="append")
     list_items.add_argument("--unhandled", action="store_true")
     list_items.set_defaults(func=cmd_list_items)
 

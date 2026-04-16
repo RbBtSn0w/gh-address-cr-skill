@@ -313,6 +313,35 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(close_item["status"], "CLOSED")
         self.assertTrue(close_item["handled"])
 
+    def test_ingest_local_sync_keeps_identical_findings_scoped_per_source(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "title": "Shared finding",
+                    "body": "Two producers reported the same issue.",
+                    "path": "src/shared.py",
+                    "line": 11,
+                    "severity": "P2",
+                    "category": "correctness",
+                }
+            ]
+        )
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:a", stdin=payload, check=True)
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:b", stdin=payload, check=True)
+
+        synced = self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:a", "--sync", stdin="[]")
+        self.assertEqual(synced.returncode, 0, synced.stderr)
+        self.assertIn("Synced 1 missing local item(s) to CLOSED.", synced.stdout)
+
+        session = self.load_session()
+        local_items = [item for item in session["items"].values() if item["item_kind"] == "local_finding"]
+        self.assertEqual(len(local_items), 2)
+        closed_item = next(item for item in local_items if item["source"] == "local-agent:a")
+        open_item = next(item for item in local_items if item["source"] == "local-agent:b")
+        self.assertEqual(closed_item["status"], "CLOSED")
+        self.assertEqual(open_item["status"], "OPEN")
+
     def test_claim_and_update_status(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         payload = json.dumps(

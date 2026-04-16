@@ -116,6 +116,7 @@ def main() -> int:
     parser.add_argument("--scan-id", default="")
     parser.add_argument("--source", default=None)
     parser.add_argument("--sync", action="store_true", help="Close missing local findings from the same source.")
+    parser.add_argument("--handoff-sha256", default="")
     parser.add_argument(
         "--input",
         default="-",
@@ -153,6 +154,8 @@ def main() -> int:
         ingest_cmd.extend(["--scan-id", args.scan_id])
     if args.sync:
         ingest_cmd.append("--sync")
+    if args.handoff_sha256:
+        ingest_cmd.extend(["--handoff-sha256", args.handoff_sha256])
 
     ingest_result = subprocess.run(
         ingest_cmd,

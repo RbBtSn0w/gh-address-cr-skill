@@ -39,6 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--scan-id", default="")
     parser.add_argument("--source", default="")
     parser.add_argument("--sync", action="store_true", help="Close missing local findings from the same source.")
+    parser.add_argument("--handoff-sha256", default="")
     parser.add_argument("--input", default=None, help="Findings JSON file. Use '-' to read from stdin.")
     parser.add_argument("--max-iterations", type=int, default=10)
     parser.add_argument("--loop-threshold", type=int, default=engine.LOOP_WARNING_THRESHOLD)
@@ -323,6 +324,8 @@ def run_intake(args: argparse.Namespace, producer: str | None, repo: str, pr_num
                 cmd.extend(["--source", args.source or f"local-agent:{producer}"])
             if args.sync:
                 cmd.append("--sync")
+            if args.handoff_sha256:
+                cmd.extend(["--handoff-sha256", args.handoff_sha256])
             if args.input is not None:
                 cmd.extend(["--input", args.input])
             cmd.extend([repo, pr_number])
