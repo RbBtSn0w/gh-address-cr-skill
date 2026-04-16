@@ -703,6 +703,8 @@ npx skills update
 - Mandatory final gate (`python3 gh-address-cr/scripts/cli.py final-gate`) before completion
 - Session-scoped state tracking to avoid duplicate work
 - Audit log + trace log + audit summary + summary hash output
+- Audit summaries include labeled total, new in this run, unresolved, and handled in this run counts, not just final zero-state gate metrics
+- `python3 gh-address-cr/scripts/cli.py final-gate` also prints the same current-run snapshot in human-readable form before the raw machine diagnostics
 - Python-first implementation with a single CLI entrypoint
 - Module-split automated tests for session, wrappers, and helper scripts
 

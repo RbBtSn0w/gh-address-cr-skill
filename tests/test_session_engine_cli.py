@@ -459,6 +459,135 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(passed.returncode, 0, passed.stderr)
         self.assertIn("SESSION GATE PASS", passed.stdout)
 
+    def test_gate_summary_reports_current_run_counts_not_lifetime_totals(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        gh_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_3A",
+                    "isResolved": True,
+                    "isOutdated": False,
+                    "path": "src/a.py",
+                    "line": 1,
+                    "body": "Fix me first.",
+                    "url": "https://example.test/thread/3a",
+                },
+                {
+                    "id": "THREAD_3B",
+                    "isResolved": True,
+                    "isOutdated": False,
+                    "path": "src/b.py",
+                    "line": 2,
+                    "body": "Fix me second.",
+                    "url": "https://example.test/thread/3b",
+                },
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, "--scan-id", "seed-run", stdin=gh_payload, check=True)
+        self.run_engine("sync-github", self.repo, self.pr, "--scan-id", "current-run", stdin=gh_payload, check=True)
+
+        gated = self.run_engine("gate", self.repo, self.pr)
+        self.assertEqual(gated.returncode, 0, gated.stderr)
+        self.assertIn("tracked_items_count=2", gated.stdout)
+        self.assertIn("handled_items_count=2", gated.stdout)
+        self.assertIn("github_threads_total_count=2", gated.stdout)
+        self.assertIn("github_threads_new_count=0", gated.stdout)
+        self.assertIn("github_threads_handled_this_run_count=0", gated.stdout)
+        self.assertIn("github_threads_unresolved_count=0", gated.stdout)
+        self.assertIn("local_findings_total_count=0", gated.stdout)
+        self.assertIn("local_findings_new_count=0", gated.stdout)
+        self.assertIn("local_findings_handled_this_run_count=0", gated.stdout)
+        self.assertIn("local_findings_unresolved_count=0", gated.stdout)
+
+        summary = (self.workspace_dir() / "audit_summary.md").read_text(encoding="utf-8")
+        self.assertIn("## Current Run Snapshot", summary)
+        self.assertIn("- GitHub threads: total 2; new in this run 0; unresolved 0; handled in this run 0", summary)
+        self.assertIn("- Local findings: total 0; new in this run 0; unresolved 0; handled in this run 0", summary)
+
+    def test_gate_summary_reports_new_and_handled_counts_for_current_run(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        gh_seed_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_EXISTING",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/existing.py",
+                    "line": 1,
+                    "body": "Existing thread.",
+                    "url": "https://example.test/thread/existing",
+                }
+            ]
+        )
+        local_seed_payload = json.dumps(
+            [
+                {
+                    "title": "Existing local finding",
+                    "body": "Needs a fix.",
+                    "path": "src/local.py",
+                    "line": 3,
+                    "severity": "P2",
+                    "category": "correctness",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, "--scan-id", "seed-run", stdin=gh_seed_payload, check=True)
+        self.run_engine("ingest-local", self.repo, self.pr, "--source", "local-agent:test", "--scan-id", "seed-run", stdin=local_seed_payload, check=True)
+
+        gh_current_payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_EXISTING",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/existing.py",
+                    "line": 1,
+                    "body": "Existing thread.",
+                    "url": "https://example.test/thread/existing",
+                },
+                {
+                    "id": "THREAD_NEW",
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/new.py",
+                    "line": 7,
+                    "body": "New thread.",
+                    "url": "https://example.test/thread/new",
+                },
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, "--scan-id", "current-run", stdin=gh_current_payload, check=True)
+        self.run_engine("update-item", self.repo, self.pr, "github-thread:THREAD_EXISTING", "CLOSED", "--note", "Resolved on GitHub.", check=True)
+        self.run_engine("update-item", self.repo, self.pr, "github-thread:THREAD_NEW", "CLOSED", "--note", "Resolved on GitHub.", check=True)
+
+        session = self.load_session()
+        local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
+        self.run_engine(
+            "resolve-local-item",
+            self.repo,
+            self.pr,
+            local_id,
+            "fix",
+            "--note",
+            "Resolved in current run.",
+            check=True,
+        )
+
+        gated = self.run_engine("gate", self.repo, self.pr)
+        self.assertEqual(gated.returncode, 0, gated.stderr)
+        self.assertIn("github_threads_total_count=2", gated.stdout)
+        self.assertIn("github_threads_new_count=1", gated.stdout)
+        self.assertIn("github_threads_handled_this_run_count=2", gated.stdout)
+        self.assertIn("github_threads_unresolved_count=0", gated.stdout)
+        self.assertIn("local_findings_total_count=1", gated.stdout)
+        self.assertIn("local_findings_new_count=0", gated.stdout)
+        self.assertIn("local_findings_handled_this_run_count=1", gated.stdout)
+        self.assertIn("local_findings_unresolved_count=0", gated.stdout)
+
+        summary = (self.workspace_dir() / "audit_summary.md").read_text(encoding="utf-8")
+        self.assertIn("- GitHub threads: total 2; new in this run 1; unresolved 0; handled in this run 2", summary)
+        self.assertIn("- Local findings: total 1; new in this run 0; unresolved 0; handled in this run 1", summary)
+
     def test_close_item_marks_local_finding_closed_and_handled(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         local_payload = json.dumps(

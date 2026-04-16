@@ -172,6 +172,8 @@ def ensure_item_runtime_fields(item: dict):
     item.setdefault("needs_human", False)
     item.setdefault("reply_posted", False)
     item.setdefault("reply_url", None)
+    item.setdefault("created_run_id", None)
+    item.setdefault("handled_run_id", None)
 
 
 def load_session(repo: str, pr_number: str) -> dict:
@@ -212,6 +214,52 @@ def recalc_metrics(session: dict):
 
 def blocking_for_status(status: str) -> bool:
     return status in BLOCKING_STATUSES
+
+
+def set_handled_state(
+    item: dict,
+    handled: bool,
+    *,
+    run_id: str | None,
+    now: str | None = None,
+    preserve_existing: bool = False,
+):
+    item["handled"] = handled
+    if handled:
+        if preserve_existing and item.get("handled_at"):
+            return
+        item["handled_at"] = now or utc_now()
+        item["handled_run_id"] = run_id
+        return
+    item["handled_at"] = None
+    item["handled_run_id"] = None
+
+
+def gate_progress_counts(session: dict, blocking: list[dict], unresolved_threads: list[dict]) -> dict:
+    items = list(session["items"].values())
+    github_items = [item for item in items if item["item_kind"] == "github_thread"]
+    local_items = [item for item in items if item["item_kind"] == "local_finding"]
+    run_id = current_run_id(session)
+    return {
+        "tracked_items_count": len(items),
+        "handled_items_count": sum(1 for item in items if item.get("handled")),
+        "github_threads_total_count": len(github_items),
+        "github_threads_handled_count": len(github_items) - len(unresolved_threads),
+        "github_threads_new_count": sum(1 for item in github_items if run_id and item.get("created_run_id") == run_id),
+        "github_threads_handled_this_run_count": sum(
+            1 for item in github_items if run_id and item.get("handled") and item.get("handled_run_id") == run_id
+        ),
+        "github_threads_unresolved_count": len(unresolved_threads),
+        "local_findings_total_count": len(local_items),
+        "local_findings_handled_count": sum(1 for item in local_items if item.get("handled")),
+        "local_findings_new_count": sum(1 for item in local_items if run_id and item.get("created_run_id") == run_id),
+        "local_findings_handled_this_run_count": sum(
+            1 for item in local_items if run_id and item.get("handled") and item.get("handled_run_id") == run_id
+        ),
+        "local_findings_unresolved_count": sum(1 for item in local_items if item.get("blocking")),
+        "local_findings_blocking_count": sum(1 for item in local_items if item.get("blocking")),
+        "blocking_items_count": len(blocking),
+    }
 
 
 def normalize_text(value: str) -> str:
@@ -257,6 +305,7 @@ def read_records_from_stdin() -> list[dict]:
 def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
     item_id = f"github-thread:{row['id']}"
     now = utc_now()
+    run_id = current_run_id(session)
     resolved = bool(row.get("isResolved"))
     existing = session["items"].get(item_id)
     existing_status = existing.get("status") if existing else None
@@ -286,10 +335,9 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         "status": status,
         "decision": None,
         "blocking": blocking_for_status(status),
-        "handled": False if reopened else ((existing.get("handled") if existing else False) or resolved),
-        "handled_at": None if reopened else (
-            existing.get("handled_at") if existing and existing.get("handled_at") else (now if resolved else None)
-        ),
+        "handled": False,
+        "handled_at": existing.get("handled_at") if existing else None,
+        "handled_run_id": existing.get("handled_run_id") if existing else None,
         "resolution_note": existing.get("resolution_note") if existing else None,
         "published": True,
         "published_ref": row.get("url"),
@@ -314,8 +362,21 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         "reply_posted": False if reopened else (existing.get("reply_posted", False) if existing else False),
         "reply_url": None if reopened else (existing.get("reply_url") if existing else None),
         "created_at": existing.get("created_at") if existing else now,
+        "created_run_id": existing.get("created_run_id") if existing else run_id,
         "updated_at": now,
     }
+    if reopened:
+        set_handled_state(payload, False, run_id=None)
+    elif resolved:
+        set_handled_state(
+            payload,
+            True,
+            run_id=run_id,
+            now=now,
+            preserve_existing=bool(existing and existing.get("handled")),
+        )
+    else:
+        set_handled_state(payload, False, run_id=None)
     created = existing is None
     if created:
         payload["history"].append(history_event("created", "Imported from GitHub"))
@@ -332,6 +393,7 @@ def add_local_finding(session: dict, finding: dict, source: str) -> tuple[str, b
     fingerprint = fingerprint_finding(finding)
     item_id = f"local-finding:{fingerprint}"
     now = utc_now()
+    run_id = current_run_id(session)
     existing = session["items"].get(item_id)
     if existing:
         existing["last_seen_in_sha"] = finding.get("head_sha") or existing.get("last_seen_in_sha")
@@ -341,8 +403,7 @@ def add_local_finding(session: dict, finding: dict, source: str) -> tuple[str, b
         if existing.get("status") != "OPEN":
             existing["status"] = "OPEN"
             existing["blocking"] = True
-            existing["handled"] = False
-            existing["handled_at"] = None
+            set_handled_state(existing, False, run_id=None)
             existing["needs_human"] = False
             existing["decision"] = None
             existing["resolution_note"] = None
@@ -374,6 +435,7 @@ def add_local_finding(session: dict, finding: dict, source: str) -> tuple[str, b
         "blocking": blocking_for_status(status),
         "handled": False,
         "handled_at": None,
+        "handled_run_id": None,
         "resolution_note": None,
         "published": False,
         "published_ref": None,
@@ -395,6 +457,7 @@ def add_local_finding(session: dict, finding: dict, source: str) -> tuple[str, b
         "needs_human": False,
         "history": [history_event("created", "Imported from local review")],
         "created_at": now,
+        "created_run_id": run_id,
         "updated_at": now,
     }
     return item_id, True
@@ -408,6 +471,7 @@ def ensure_item(session: dict, item_id: str) -> dict:
 
 
 def reconcile_published_findings(session: dict):
+    run_id = current_run_id(session)
     github_items = [item for item in session["items"].values() if item["item_kind"] == "github_thread"]
     for item in session["items"].values():
         if item["item_kind"] != "local_finding" or item["status"] != "PUBLISHED":
@@ -422,8 +486,13 @@ def reconcile_published_findings(session: dict):
                 item["linked_github_item_id"] = github_item["item_id"]
                 item["status"] = "CLOSED"
                 item["blocking"] = False
-                item["handled"] = True
-                item["handled_at"] = now
+                set_handled_state(
+                    item,
+                    True,
+                    run_id=run_id,
+                    now=now,
+                    preserve_existing=bool(item.get("handled")),
+                )
                 item["updated_at"] = now
                 clear_claim(item)
                 item["history"].append(history_event("linked", f"Linked to {github_item['item_id']}"))
@@ -490,6 +559,7 @@ def cmd_ingest_local(args):
     session = load_session(args.repo, args.pr_number)
     findings = [normalize_finding(record) for record in read_records_from_stdin()]
     session["current_scan_id"] = args.scan_id or utc_now()
+    run_id = current_run_id(session)
     incoming_ids = {f"local-finding:{fingerprint_finding(finding)}" for finding in findings}
     created = 0
     for finding in findings:
@@ -511,8 +581,13 @@ def cmd_ingest_local(args):
             item["status"] = "CLOSED"
             item["blocking"] = False
             item["decision"] = "sync"
-            item["handled"] = True
-            item["handled_at"] = now
+            set_handled_state(
+                item,
+                True,
+                run_id=run_id,
+                now=now,
+                preserve_existing=bool(item.get("handled")),
+            )
             item["updated_at"] = now
             item["resolution_note"] = "Auto-resolved because the finding disappeared from synchronized input."
             clear_claim(item)
@@ -578,6 +653,7 @@ def cmd_update_item(args):
     if args.status not in VALID_STATUSES:
         raise SystemExit(f"Invalid status: {args.status}")
     session = load_session(args.repo, args.pr_number)
+    run_id = current_run_id(session)
     item = ensure_item(session, args.item_id)
     previous_status = item["status"]
     validate_transition(item["status"], args.status)
@@ -592,17 +668,31 @@ def cmd_update_item(args):
     if args.status == "OPEN":
         clear_claim(item)
     if item["item_kind"] == "local_finding" and args.status in {"CLARIFIED", "DEFERRED", "VERIFIED", "CLOSED"}:
-        item["handled"] = True
-        item["handled_at"] = utc_now()
+        set_handled_state(
+            item,
+            True,
+            run_id=run_id,
+            now=item["updated_at"],
+            preserve_existing=bool(item.get("handled")),
+        )
     elif args.status == "OPEN":
-        item["handled"] = False
-        item["handled_at"] = None
+        set_handled_state(item, False, run_id=None)
     elif args.handled:
-        item["handled"] = True
-        item["handled_at"] = utc_now()
+        set_handled_state(
+            item,
+            True,
+            run_id=run_id,
+            now=item["updated_at"],
+            preserve_existing=bool(item.get("handled")),
+        )
     else:
-        item["handled"] = not item["blocking"]
-        item["handled_at"] = utc_now() if item["handled"] else None
+        set_handled_state(
+            item,
+            not item["blocking"],
+            run_id=run_id if not item["blocking"] else None,
+            now=item["updated_at"],
+            preserve_existing=bool(item.get("handled")) and not item["blocking"],
+        )
     if args.decision:
         item["decision"] = args.decision
     if args.note:
@@ -627,6 +717,7 @@ def cmd_update_item(args):
 
 def cmd_update_items_batch(args):
     session = load_session(args.repo, args.pr_number)
+    run_id = current_run_id(session)
     updates = read_records_from_stdin()
     for update in updates:
         item_id = update["item_id"]
@@ -638,8 +729,23 @@ def cmd_update_items_batch(args):
             item["blocking"] = blocking_for_status(status)
         item["updated_at"] = utc_now()
         if update.get("handled") is not None:
-            item["handled"] = update["handled"]
-            item["handled_at"] = utc_now() if item["handled"] else None
+            set_handled_state(
+                item,
+                update["handled"],
+                run_id=run_id if update["handled"] else None,
+                now=item["updated_at"],
+                preserve_existing=bool(item.get("handled")) and bool(update["handled"]),
+            )
+        elif status is not None and not item["blocking"]:
+            set_handled_state(
+                item,
+                True,
+                run_id=run_id,
+                now=item["updated_at"],
+                preserve_existing=bool(item.get("handled")),
+            )
+        elif status is not None and item["blocking"]:
+            set_handled_state(item, False, run_id=None)
         if update.get("decision"):
             item["decision"] = update["decision"]
         note = update.get("note")
@@ -705,15 +811,16 @@ def cmd_reclaim_stale_claims(args):
 
 def cmd_close_item(args):
     session = load_session(args.repo, args.pr_number)
+    run_id = current_run_id(session)
     item = ensure_item(session, args.item_id)
     validate_transition(item["status"], "CLOSED")
     require_note("CLOSED", args.note)
     item["status"] = "CLOSED"
     item["blocking"] = False
-    item["handled"] = True
-    item["handled_at"] = utc_now()
+    handled_at = utc_now()
+    set_handled_state(item, True, run_id=run_id, now=handled_at, preserve_existing=bool(item.get("handled")))
     clear_claim(item)
-    item["updated_at"] = utc_now()
+    item["updated_at"] = handled_at
     item["resolution_note"] = args.note
     item["history"].append(history_event("closed", args.note or "Closed item", actor=args.actor))
     save_session(session)
@@ -732,6 +839,7 @@ def cmd_close_item(args):
 
 def cmd_resolve_local_item(args):
     session = load_session(args.repo, args.pr_number)
+    run_id = current_run_id(session)
     item = ensure_item(session, args.item_id)
     if item["item_kind"] != "local_finding":
         raise SystemExit("resolve-local-item only supports local_finding items.")
@@ -758,10 +866,15 @@ def cmd_resolve_local_item(args):
         item["history"].append(history_event("deferred", args.note, actor=args.actor))
 
     item["blocking"] = blocking_for_status(item["status"])
-    item["handled"] = not item["blocking"]
-    item["handled_at"] = utc_now() if item["handled"] else None
-    clear_claim(item)
     item["updated_at"] = utc_now()
+    set_handled_state(
+        item,
+        not item["blocking"],
+        run_id=run_id if not item["blocking"] else None,
+        now=item["updated_at"],
+        preserve_existing=bool(item.get("handled")) and not item["blocking"],
+    )
+    clear_claim(item)
     item["resolution_note"] = args.note
     save_session(session)
     append_audit_event(
@@ -786,6 +899,7 @@ def cmd_mark_published(args):
     require_note("PUBLISHED", args.note)
     item["status"] = "PUBLISHED"
     item["blocking"] = True
+    set_handled_state(item, False, run_id=None)
     item["published"] = True
     item["published_ref"] = args.published_ref
     item["url"] = args.url
@@ -808,10 +922,11 @@ def cmd_mark_published(args):
 
 def cmd_mark_handled(args):
     session = load_session(args.repo, args.pr_number)
+    run_id = current_run_id(session)
     item = ensure_item(session, args.item_id)
-    item["handled"] = True
-    item["handled_at"] = utc_now()
-    item["updated_at"] = utc_now()
+    handled_at = utc_now()
+    set_handled_state(item, True, run_id=run_id, now=handled_at, preserve_existing=bool(item.get("handled")))
+    item["updated_at"] = handled_at
     item["resolution_note"] = args.note or item.get("resolution_note")
     item["history"].append(history_event("handled", args.note or "Marked handled", actor=args.actor))
     save_session(session)
@@ -866,6 +981,7 @@ def cmd_gate(args):
     ]
     session_gate = "PASS" if not blocking and not invalid_local_items and not loop_warning_items else "FAIL"
     remote_gate = "PASS" if not unresolved_threads else "FAIL"
+    progress = gate_progress_counts(session, blocking, unresolved_threads)
     summary = summary_path(args.repo, args.pr_number)
     lines = [
         "# Audit Summary",
@@ -878,6 +994,20 @@ def cmd_gate(args):
         f"- unresolved_github_threads_count: {len(unresolved_threads)}",
         f"- invalid_local_items_count: {len(invalid_local_items)}",
         f"- loop_warning_items_count: {len(loop_warning_items)}",
+        "",
+        "## Current Run Snapshot",
+        (
+            f"- GitHub threads: total {progress['github_threads_total_count']}; "
+            f"new in this run {progress['github_threads_new_count']}; "
+            f"unresolved {progress['github_threads_unresolved_count']}; "
+            f"handled in this run {progress['github_threads_handled_this_run_count']}"
+        ),
+        (
+            f"- Local findings: total {progress['local_findings_total_count']}; "
+            f"new in this run {progress['local_findings_new_count']}; "
+            f"unresolved {progress['local_findings_unresolved_count']}; "
+            f"handled in this run {progress['local_findings_handled_this_run_count']}"
+        ),
     ]
     if blocking:
         lines.extend(["", "## Blocking Items"])
@@ -911,6 +1041,7 @@ def cmd_gate(args):
             "blocking_items_count": len(blocking),
             "invalid_local_items_count": len(invalid_local_items),
             "loop_warning_items_count": len(loop_warning_items),
+            **progress,
             "summary_file": str(summary),
             "summary_sha256": digest,
         },
@@ -922,6 +1053,19 @@ def cmd_gate(args):
     print(f"unresolved_github_threads_count={len(unresolved_threads)}")
     print(f"invalid_local_items_count={len(invalid_local_items)}")
     print(f"loop_warning_items_count={len(loop_warning_items)}")
+    print(f"tracked_items_count={progress['tracked_items_count']}")
+    print(f"handled_items_count={progress['handled_items_count']}")
+    print(f"github_threads_total_count={progress['github_threads_total_count']}")
+    print(f"github_threads_handled_count={progress['github_threads_handled_count']}")
+    print(f"github_threads_new_count={progress['github_threads_new_count']}")
+    print(f"github_threads_handled_this_run_count={progress['github_threads_handled_this_run_count']}")
+    print(f"github_threads_unresolved_count={progress['github_threads_unresolved_count']}")
+    print(f"local_findings_total_count={progress['local_findings_total_count']}")
+    print(f"local_findings_handled_count={progress['local_findings_handled_count']}")
+    print(f"local_findings_new_count={progress['local_findings_new_count']}")
+    print(f"local_findings_handled_this_run_count={progress['local_findings_handled_this_run_count']}")
+    print(f"local_findings_unresolved_count={progress['local_findings_unresolved_count']}")
+    print(f"local_findings_blocking_count={progress['local_findings_blocking_count']}")
     print(f"audit_summary={summary}")
     print(f"audit_summary_sha256={digest}")
     return 0 if session_gate == "PASS" and remote_gate == "PASS" else 1

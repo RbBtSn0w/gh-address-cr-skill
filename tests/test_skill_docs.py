@@ -67,6 +67,20 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("python3 scripts/cli.py final-gate <owner/repo> <pr_number>", text)
         self.assertNotIn("README.md", text)
 
+    def test_skill_completion_contract_prefers_labeled_current_run_summary(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        self.assertIn("readable current-run handling summary", text)
+        self.assertIn(
+            "GitHub threads: total 2; new in this run 0; unresolved 0; handled in this run 0",
+            text,
+        )
+        self.assertIn("prefer the human-readable `Current Run Snapshot` block", text)
+
+    def test_openai_hint_prefers_natural_language_current_run_counts(self):
+        text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
+        self.assertIn("summarize the current-run queue counts in natural language", text)
+        self.assertIn("prefer the human-readable `Current Run Snapshot` block", text)
+
     def test_skill_owned_references_and_agent_hints_use_skill_relative_paths(self):
         for path in (MODE_PRODUCER_MATRIX_MD, LOCAL_REVIEW_ADAPTER_MD, OPENAI_HINT_YAML):
             text = path.read_text(encoding="utf-8")

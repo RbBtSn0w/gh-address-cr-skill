@@ -162,6 +162,12 @@ Advanced producer and dispatch details live in:
   - output includes `Verified: 0 Unresolved Threads found`, and
   - output includes `Verified: 0 Pending Reviews found`, and
   - session blocking item count is zero.
+- Completion summaries must lead with a readable current-run handling summary from the same gate run, not just the final zero counts:
+  - GitHub threads: total, new in this run, unresolved, handled in this run
+  - local findings: total, new in this run, unresolved, handled in this run
+  - prefer labeled phrasing such as `GitHub threads: total 2; new in this run 0; unresolved 0; handled in this run 0`
+  - prefer the human-readable `Current Run Snapshot` block printed by `python3 scripts/cli.py final-gate ...`; use raw machine count lines only as fallback evidence
+  - use `audit_summary.md` or the machine-readable count lines printed by `final-gate`
 - If gate fails, continue iteration; completion summary is forbidden.
 
 ## Core Rules
@@ -315,10 +321,15 @@ Prefer `NEEDS_HUMAN` over speculative fixes when:
 Final output must include:
 
 1. `final_gate` command used
-2. `Verified: 0 Unresolved Threads found`
-3. unresolved GitHub threads = 0
-4. session blocking items = 0
-5. audit summary path + sha256
+2. readable current-run handling summary from the same gate run:
+   - GitHub threads total, new in this run, unresolved, handled in this run
+   - local findings total, new in this run, unresolved, handled in this run
+   - prefer labeled phrasing such as `GitHub threads: total 2; new in this run 0; unresolved 0; handled in this run 0`
+3. `Verified: 0 Unresolved Threads found`
+4. `Verified: 0 Pending Reviews found`
+5. unresolved GitHub threads = 0
+6. session blocking items = 0
+7. audit summary path + sha256
 
 For run-scoped diagnostics, use:
 

@@ -10,4 +10,4 @@ interface:
     4. Prefer the default internal fixer path for loop execution; use `--fixer-cmd` only for advanced external integrations.
     5. GitHub review threads require both reply and resolve.
     6. Local findings require valid terminal notes.
-    7. Before any completion statement, run `python3 scripts/cli.py final-gate ...`.
+    7. Before any completion statement, run `python3 scripts/cli.py final-gate ...` and summarize the current-run queue counts in natural language. Include total, new in this run, unresolved, and handled in this run for both GitHub threads and local findings; prefer the human-readable `Current Run Snapshot` block and use raw machine count lines only as fallback evidence.
