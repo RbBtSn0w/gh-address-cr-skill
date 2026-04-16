@@ -1,26 +1,405 @@
 # gh-address-cr skill
 
-An auditable GitHub PR review-comments workflow skill for AI coding agents.
+An auditable PR-session workflow skill for AI coding agents.
 
-It is designed to process CR threads one by one, enforce evidence-first replies,
-and require a final freshness gate before declaring completion.
-For handled threads, replying and resolving are two separate required operations.
+It now treats a Pull Request as the session root and can ingest both:
+
+- GitHub review threads
+- local AI-agent review findings
+
+Both become session items that move through one evidence-first workflow with a final gate.
+For handled GitHub threads, replying and resolving are still two separate required operations.
+
+## Public Interface
+
+`gh-address-cr` should be understood first as a PR-scoped workflow orchestrator with one public main entrypoint:
+
+- `review`
+
+Advanced/internal integration entrypoints:
+
+- `threads`
+- `findings`
+- `adapter`
+- `review-to-findings`
+
+Fail-fast contract:
+
+- `review` does not bind to any one review skill or tool name.
+- `review` is the public main entrypoint.
+- If findings are absent, `review` returns `WAITING_FOR_EXTERNAL_REVIEW` and writes a standard producer handoff request instead of waiting on `stdin`.
+- External producer output must be findings JSON or fixed `finding` blocks.
+- `findings` still requires explicit findings JSON input.
+- `review-to-findings` does not accept arbitrary Markdown. It only accepts the fixed `finding` block format.
+- `review`, `threads`, and `adapter` also fail immediately when `gh` is missing from `PATH`.
+- For `adapter`, wrapper `--human` and `--machine` belong before `adapter`. Arguments after `<adapter_cmd...>` are passed through to the adapter command unchanged.
+- The high-level CLI commands are the agent-safe public surface. Treat low-level scripts as implementation details.
+
+`review` is the default orchestrator. It either:
+
+- consumes explicit findings input when `--input` is supplied, or
+- generates an external review handoff and waits for a producer-compatible result
+
+High-level entrypoints emit machine-readable JSON summaries by default. Use `--human` when a person needs narrative text. `--machine` remains a compatibility alias.
+
+Minimal invocation model:
+
+```text
+/gh-address-cr review <owner/repo> <pr_number>
+```
+
+Advanced/internal integrations are documented later in this README.
+
+Stable machine summary fields:
+
+- `status`
+- `repo`
+- `pr_number`
+- `item_id`
+- `item_kind`
+- `counts`
+- `artifact_path`
+- `reason_code`
+- `waiting_on`
+- `next_action`
+- `exit_code`
+
+`reason_code` is the stable machine reason. `waiting_on` is the stable wait-state category.
+`counts.*` may be `null` in preflight wait/fail states before GitHub or session scans run.
+
+Main entrypoint examples:
+
+```text
+$gh-address-cr review <PR_URL>
+```
+
+High-level entrypoints:
+
+- `review`
+  - public main entrypoint
+  - runs the full PR review workflow automatically
+  - waits for external producer handoff when findings are absent
+  - handles both local findings and GitHub review threads in one run
+  - emits a machine-readable JSON summary by default
+- `threads`
+  - advanced/internal: GitHub review threads only
+  - emits a machine-readable JSON summary by default
+- `findings`
+  - advanced/internal: existing findings JSON only
+  - handles local findings only; it does not process GitHub review threads
+  - emits a machine-readable JSON summary by default
+- `adapter`
+  - advanced/internal: adapter-produced findings plus PR orchestration, including GitHub thread handling
+  - emits a machine-readable JSON summary by default
+- `review-to-findings`
+  - advanced/internal: fixed-format finding blocks to findings JSON
+
+Automatic external review handoff:
+
+- `review` writes `producer-request.md` when findings are absent
+- any external review producer may satisfy the handoff
+- preferred handoff file: `incoming-findings.json`
+- fallback handoff file: `incoming-findings.md`
+- `incoming-findings.md` must contain fixed `finding` blocks
+- rerun the same `review` command after writing one of the handoff files
+- plain narrative Markdown is not accepted
+
+Producer contract:
+
+- `gh-address-cr` does not require a specific skill name
+- it accepts output from any external review producer
+- the producer may be another skill, a command, or another review tool
+- the only required contract is findings JSON or fixed `finding` blocks
+
+Minimal user prompt:
+
+```text
+使用 $gh-address-cr 完整处理这个 PR：<PR_URL>
+```
+
+Typical flows:
+
+```text
+// Main flow: start the PR session
+$gh-address-cr review <PR_URL>
+
+// If findings are absent, `review` returns WAITING_FOR_EXTERNAL_REVIEW
+// and writes:
+// - producer-request.md
+// - incoming-findings.json
+// - incoming-findings.md
+
+// If you are also the review producer, write findings JSON to incoming-findings.json
+// or fixed `finding` blocks to incoming-findings.md now.
+// Do not write a plain Markdown-only review report.
+
+// After any external review producer fills a handoff file, rerun the same command
+$gh-address-cr review <PR_URL>
+
+// If review returns BLOCKED, inspect loop-request-*.json, apply fix/clarify/defer,
+// then rerun the same review command
+
+// Adapter wrapper output flag comes before `adapter`
+python3 gh-address-cr/scripts/cli.py --human adapter owner/repo 123 python3 tools/review_adapter.py
+
+// Flags after the adapter command belong to the adapter itself
+python3 gh-address-cr/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py --base main --human
+```
+
+Minimal valid `review-to-findings` input:
+
+````text
+```finding
+title: Missing null guard
+path: src/example.py
+line: 12
+body: Potential null dereference.
+```
+````
+
+This converter rejects plain narrative Markdown review output.
+
+Prompt patterns:
+
+```text
+先运行 `$gh-address-cr review <PR_URL>`。
+
+如果当前 PR 还没有 findings，`review` 应进入 `WAITING_FOR_EXTERNAL_REVIEW`，
+写出 `producer-request.md`、`incoming-findings.json`、`incoming-findings.md`。
+
+如果你自己就是外部 review producer，就在当前任务里直接生成 findings JSON，
+写入 `incoming-findings.json`；或者生成固定格式的 `finding` blocks`，
+写入 `incoming-findings.md`。不要只输出普通 Markdown 审查报告。
+
+收到 handoff 后，重新运行同一条 `review` 命令，继续处理 session、GitHub review threads、fix 和 final-gate，直到通过。
+```
+
+Ready-to-use prompt variants:
+
+- Short generic:
+
+```text
+使用 $gh-address-cr 完整处理这个 PR：<PR_URL>。
+```
+
+- Explicit `$code-review` producer:
+
+```text
+使用 $gh-address-cr 完整处理这个 PR：<PR_URL>。
+
+先运行 $gh-address-cr review。
+如果返回 WAITING_FOR_EXTERNAL_REVIEW，就使用 $code-review 作为外部 review producer。
+按照 producer-request.md 的要求交接：
+- 优先把 findings JSON 写入 incoming-findings.json
+- 如果只能输出固定格式的 `finding` blocks，就写入 incoming-findings.md
+- 不要只输出普通 Markdown 审查报告
+
+写入 handoff 文件后，重新运行同一条 $gh-address-cr review 命令，
+继续处理 session、GitHub threads、fix、reply/resolve 和 final-gate，直到通过。
+```
+
+- Any external review producer:
+
+```text
+使用 $gh-address-cr 完整处理这个 PR：<PR_URL>。
+
+先运行 $gh-address-cr review。
+如果返回 WAITING_FOR_EXTERNAL_REVIEW，就使用当前环境中可用的外部 review 能力完成审查。
+按照 producer-request.md 的要求交接：
+- 优先把 findings JSON 写入 incoming-findings.json
+- 如果只能输出固定格式的 `finding` blocks，就写入 incoming-findings.md
+- 不要只输出普通 Markdown 审查报告
+
+写入 handoff 文件后，重新运行同一条 $gh-address-cr review 命令，
+继续处理 session、GitHub threads、fix、reply/resolve 和 final-gate，直到通过。
+```
+
+## Choosing Fixes
+
+`gh-address-cr` is not "fix every comment immediately". The intended workflow is:
+
+1. verify the claim in current HEAD
+2. classify it as `fix`, `clarify`, `defer`, or `reject`
+3. only modify code after the item is confirmed and in scope
+
+Use these defaults:
+
+- `fix`
+  - correctness bugs
+  - session/gate/loop mismatches
+  - concurrency or state hazards
+  - CLI or wrapper compatibility regressions
+  - packaging/runtime/CI breakage
+- `clarify`
+  - reviewer misunderstood current behavior
+- `defer`
+  - issue is real but would expand the PR into a larger redesign
+- `reject`
+  - suggestion is technically incorrect or would violate an intentional contract
+
+Do not stretch the PR just to silence a thread. If the item is valid but not appropriate for the current scope, defer it with a concrete rationale.
+
+## Advanced / Developer Integration
+
+The public user flow above does not require manual `--input`, producer selection, or mode routing.
+The following commands remain available for explicit integrations, repository-root automation, and debugging.
+
+`findings --sync` requires an explicit `--source` so missing local findings stay scoped to one producer.
+
+For explicit automation or repository-root invocation, the main command is:
+
+```bash
+python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--human]
+```
+
+For `producer=code-review`, generate the standardized bridge prompt with:
+
+```bash
+python3 gh-address-cr/scripts/cli.py prepare-code-review <local|mixed> <owner/repo> <pr_number>
+```
+
+This does not run another skill by itself. It emits the exact findings contract and ingest target so a local review producer can feed `gh-address-cr` without prompt drift.
+
+If the upstream review output is Markdown review blocks, convert it first with:
+
+```bash
+python3 gh-address-cr/scripts/cli.py review-to-findings <owner/repo> <pr_number> --input -
+```
+
+The converter writes the standardized findings JSON to the cache-backed PR workspace by default and also prints the JSON to stdout.
+
+Advanced CLI examples:
+
+```text
+$gh-address-cr threads <PR_URL>
+$gh-address-cr findings <PR_URL> --input findings.json
+$gh-address-cr findings <PR_URL> --input - --sync
+$gh-address-cr adapter <PR_URL> <adapter_cmd...>
+$gh-address-cr review-to-findings <owner/repo> <pr_number> --input -
+$gh-address-cr --human adapter <owner/repo> <pr_number> <adapter_cmd...>
+$gh-address-cr adapter <owner/repo> <pr_number> <adapter_cmd...> --human --machine
+```
+
+For `adapter`, the last two examples mean different things:
+
+- `$gh-address-cr --human adapter ...`
+  - switches the wrapper output to human-oriented text
+- `$gh-address-cr adapter ... --human --machine`
+  - passes `--human --machine` to the adapter command itself
+  - it does not change the wrapper output mode
+
+`code-review` intake is now adapter-backed. Once you have structured findings JSON, the intake layer routes it through the built-in adapter instead of maintaining a separate special-case ingest path.
+
+Use the prompt patterns above as the canonical templates. Do not keep a second, shorter variant with weaker rules.
+
+If you omit the producer where it is required:
+
+- `local` and `mixed` will fail because the dispatcher cannot infer whether you mean `json`, `code-review`, or `adapter`
+- `ingest` will assume `json`
+- `remote` does not accept a producer at all
+
+## Automatic Review Workflow
+
+`review` is the autonomous runner built on top of the existing intake and gate layers.
+
+- It performs repeated intake, item selection, action execution, and gate evaluation internally.
+- By default it uses an internal fixer handoff for the current AI agent.
+- If a finding cannot be resolved automatically, the workflow writes an internal fixer request artifact into the PR cache artifacts directory and exits `BLOCKED` for the agent to handle.
+- `--fixer-cmd` remains available as an advanced integration path.
+- External fixer commands must read a JSON payload from stdin and return JSON:
+  - `resolution`: `fix`, `clarify`, or `defer`
+  - `note`
+  - `reply_markdown` for GitHub thread items
+  - optional `validation_commands`
+- `adapter` producer is re-run on each iteration.
+- `json` and `code-review` producers are treated as one-shot inputs for the current review run.
+- The workflow exits with one of:
+  - `PASSED`
+  - `NEEDS_HUMAN`
+  - `BLOCKED`
+
+Advanced external-fixer example:
+
+```bash
+python3 gh-address-cr/scripts/cli.py adapter owner/repo 123 python3 tools/review_adapter.py
+```
 
 By default, the skill stores its PR progress + audit artifacts in a user cache directory
 (override with `GH_ADDRESS_CR_STATE_DIR`). If the cache is purged, the workflow can be rebuilt
 from GitHub thread state; the main downside is potential repeated work.
 
+Advanced producer categories:
+
+- `code-review`
+- `json`
+- `adapter`
+
+Producer naming rule:
+
+- `code-review` is a producer category, not a hardcoded skill name.
+- It can be backed by `/code-review`, `/code-review-aa`, `/code-review-bb`, `/code-review-cc`, or any other review step that emits structured findings JSON.
+- `gh-address-cr` only cares about the findings contract, not the upstream tool name.
+
+Producer selection rule:
+
+- `remote`
+  - no producer is needed
+- `ingest`
+  - producer may be omitted; default is `json`
+- `local` or `mixed`
+  - producer must be explicit
+
+Use this mapping:
+
+| Upstream situation | Producer to use |
+| --- | --- |
+| Only GitHub review threads | none (`remote`) |
+| Existing findings JSON file | `json` |
+| A review-style skill/command emits findings JSON first | `code-review` |
+| A command directly prints findings JSON as its interface | `adapter` |
+
+Important:
+
+- `producer=code-review` is the category even if the upstream tool is named `/code-review-aa` or `/code-review-bb`.
+- Do not put the upstream tool name itself into the producer slot.
+- Example:
+  - correct: `review <owner/repo> <pr>`
+  - incorrect: `code-review-aa <owner/repo> <pr>`
+
+Meaning:
+
+- `remote`
+  - only GitHub review threads are part of the session
+- `local`
+  - only locally produced findings are part of the session
+- `mixed`
+  - GitHub review threads and local findings are both part of the session
+- `ingest`
+  - import existing findings JSON into the session without running a local adapter
+
+This keeps `gh-address-cr` as the session/gate/orchestration layer while letting different review producers feed findings into the same PR workflow.
+
+The exact dispatch behavior for each supported `mode + producer` combination is documented in:
+
+- `gh-address-cr/references/mode-producer-matrix.md`
+
+The preferred automation entrypoint is now:
+
+```bash
+python3 gh-address-cr/scripts/cli.py review <owner/repo> <pr_number> [--input <path>|-] [--human]
+```
+
 ## Core Workflow
 
 ```text
-       [ Start PR Review Resolution ]
+       [ Start PR Review Session ]
                    |
                    v
 +-------------------------------------+      (Fetch PR threads, exclude handled)
-|          1. run_once.sh             | <-----------------------------------------+
+|          1. python3 gh-address-cr/scripts/cli.py run-once             | <-----------------------------------------+
 +------------------+------------------+                                           |
                    |                                                              |
-                   v [Generates Snapshot & Unresolved List]                       |
+                   v [Generates Snapshot, Syncs Session, Lists Work]              |
                    |                                                              |
 +------------------+------------------+      (THE "BRAIN" STEP: Analyze & Decide) |
 |    2. Analysis & Decision Matrix    |                                           |
@@ -40,24 +419,24 @@ from GitHub thread state; the main downside is potential repeated work.
          v                   v                       v                            |
 +--------+--------+ +--------+--------+     +--------+--------+                   |
 | 4a. generate_   | | 4b. generate_   |     | 4c. generate_   |                   |
-|    reply.sh     | |    reply.sh     |     |    reply.sh     |                   |
+|    reply     | |    reply     |     |    reply     |                   |
 |    --mode fix   | |  --mode clarify |     |   --mode defer  |                   |
 +--------+--------+ +--------+--------+     +--------+--------+                   |
          |                   |                       |                            |
          +---------+---------+-----------------------+                            |
                    |                                                              |
-                   v [Generates /tmp/reply.md]                                    |
+                   v [Generates reply markdown in the PR workspace]               |
                    |                                                              |
 +------------------+------------------+      (GitHub API: Reply)                  |
-|         5. post_reply.sh            |                                           |
+|         5. python3 gh-address-cr/scripts/cli.py post-reply            |                                           |
 +------------------+------------------+                                           |
                    |                                                              |
 +------------------+------------------+      (MANDATORY for all paths)            |
-|       6. resolve_thread.sh          |      (Local state marked 'Handled')       |
+|       6. python3 gh-address-cr/scripts/cli.py resolve-thread          |      (Local state marked 'Handled')       |
 +------------------+------------------+                                           |
                    |                                                              |
 +------------------+------------------+      (HARD GATE: Re-fetch GitHub state)   |
-|         7. final_gate.sh            |-------------------------------------------+
+|         7. python3 gh-address-cr/scripts/cli.py final-gate            |-------------------------------------------+
 +------------------+------------------+      [ Failed: Unresolved > 0 (Loop back) ]
                    |
                    | [ Passed: Unresolved == 0 ]
@@ -70,6 +449,207 @@ from GitHub thread state; the main downside is potential repeated work.
                [ Done ]
 ```
 
+## PR Session Architecture
+
+`gh-address-cr` now ships a session engine at `gh-address-cr/scripts/session_engine.py`.
+
+The implementation model is now:
+
+- Python owns the stateful logic and GitHub/local-review orchestration.
+- `python3 gh-address-cr/scripts/cli.py` is the only automation entrypoint; internal commands use the Python CLI directly.
+- `gh-address-cr/scripts/cli.py` is the unified Python dispatcher for the main command set.
+- Tests are organized around Python behavior first, then CLI syntax compatibility.
+
+- `github_thread` items are synced from GraphQL thread snapshots.
+- `local_finding` items are ingested from a local review adapter.
+- local findings can now be explicitly closed in-session with `session_engine.py close-item`.
+- `python3 gh-address-cr/scripts/cli.py final-gate` evaluates both:
+  - session blocking item count
+  - unresolved GitHub thread count
+  - current-login pending review count
+
+The session state is stored in a PR-scoped workspace under the user cache directory:
+
+- workspace: `<owner>__<repo>/pr-<pr>/`
+- session: `session.json`
+- GitHub snapshots: `threads.jsonl`
+- handled threads: `handled_threads.txt`
+- audit log: `audit.jsonl`
+- trace log: `trace.jsonl`
+- audit summary: `audit_summary.md`
+- findings: `findings-*.json` and `code-review-findings.json`
+- replies: `reply-*.md`
+- loop requests: `loop-request-*.json`
+- validation records: `validation-*.json`
+
+If `python3 gh-address-cr/scripts/cli.py final-gate --auto-clean` passes, the current PR workspace is archived before deletion under:
+
+- archive root: `archive/<owner>__<repo>/pr-<pr>/<run_id>/`
+
+To inspect one run after the fact, use:
+
+```bash
+python3 gh-address-cr/scripts/audit_report.py --run-id <run_id> <owner/repo> <pr_number>
+```
+
+The session also tracks loop-safety metadata per item:
+
+- `repeat_count`: how many times the same local finding was re-ingested
+- `reopen_count`: how many times a previously closed/deferred/clarified item was reopened
+- claim lease fields so stale ownership can be reclaimed
+
+## Local AI Review Ingestion
+
+Use `python3 gh-address-cr/scripts/cli.py run-local-review` to feed local AI findings into the PR session:
+
+```bash
+python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh --base main --head HEAD
+```
+
+Adapter contract:
+
+- adapter prints a JSON array to stdout
+- each finding should include `title`, `body`, `path`, `line`
+- optional fields: `severity`, `category`, `confidence`
+
+This path does not auto-post to GitHub. It creates local session items that can be fixed and verified in the same workflow as remote review threads.
+
+If the producer is a local `code-review` run, use the built-in adapter backend:
+
+```bash
+python3 gh-address-cr/scripts/cli.py prepare-code-review mixed owner/repo 123
+cat findings.json | python3 gh-address-cr/scripts/cli.py review owner/repo 123 --input -
+```
+
+Input rule:
+
+- if you already have a real findings JSON file from another tool, use `--input <path>`
+- if findings are being produced in the current step, prefer `--input -` and pipe them over `stdin`
+- do not create ad-hoc temporary findings files in the project workspace just to drive the workflow
+- use `--sync` when you want missing local findings from the same source to auto-close on refresh
+
+`prepare-code-review` now also returns:
+
+- `workspace_dir`
+- `findings_output_path`
+- `reply_output_path`
+- `loop_request_path`
+
+Use that cache-backed findings path instead of creating review artifacts in the project workspace.
+
+If your review tool already produces findings JSON, you do not need a custom adapter command. Use `python3 gh-address-cr/scripts/cli.py ingest-findings` instead:
+
+```bash
+cat findings.json | python3 gh-address-cr/scripts/cli.py ingest-findings --source local-agent:code-review owner/repo 123
+```
+
+Accepted input shapes:
+
+- JSON array of finding objects
+- JSON object with `findings`, `issues`, or `results`
+- NDJSON, one finding object per line
+
+Field normalization is intentionally broad so external tools can map in without a custom schema bridge:
+
+- `path` or `file` or `filename`
+- `line` or `start_line` or `position`
+- `title` or `rule` or `check`
+- `body` or `message` or `description`
+
+Minimum accepted finding shape:
+
+```json
+[
+  {
+    "title": "Missing null guard",
+    "body": "Potential null dereference.",
+    "path": "src/example.py",
+    "line": 12
+  }
+]
+```
+
+This is the long-term integration path for any local code-review tool. If it can emit structured findings JSON, `gh-address-cr` can ingest it into the PR session.
+
+To publish a local finding back to GitHub as a review comment:
+
+```bash
+python3 gh-address-cr/scripts/cli.py publish-finding --repo owner/repo --pr 123 local-finding:<fingerprint>
+```
+
+To reclaim expired item claims inside a PR session:
+
+```bash
+python3 gh-address-cr/scripts/session_engine.py reclaim-stale-claims owner/repo 123
+```
+
+To apply a terminal local finding resolution atomically, use:
+
+```bash
+python3 gh-address-cr/scripts/session_engine.py resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally and verified."
+python3 gh-address-cr/scripts/session_engine.py resolve-local-item owner/repo 123 local-finding:<fingerprint> clarify --note "Expected behavior."
+python3 gh-address-cr/scripts/session_engine.py resolve-local-item owner/repo 123 local-finding:<fingerprint> defer --note "Deferred to a follow-up PR."
+```
+
+## Python-First Script Layout
+
+The main logic now lives in Python under `gh-address-cr/scripts/`:
+
+- `cli.py`
+- `cr_loop.py`
+- `code_review_adapter.py`
+- `session_engine.py`
+- `python_common.py`
+- `run_once.py`
+- `final_gate.py`
+- `list_threads.py`
+- `post_reply.py`
+- `resolve_thread.py`
+- `run_local_review.py`
+- `publish_finding.py`
+- `mark_handled.py`
+- `audit_report.py`
+- `generate_reply.py`
+- `batch_resolve.py`
+- `clean_state.py`
+
+These Python entrypoints require Python 3.10+ because the implementation uses modern typing syntax such as `list[str]` and `str | None`.
+
+The Python CLI is the stable automation surface; all internal commands use the Python CLI directly.
+
+Unified CLI examples:
+
+```bash
+python3 gh-address-cr/scripts/cli.py run-once owner/repo 123
+python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean owner/repo 123
+python3 gh-address-cr/scripts/cli.py session-engine gate owner/repo 123
+python3 gh-address-cr/scripts/cli.py ingest-findings --source local-agent:code-review owner/repo 123 --input findings.json
+python3 gh-address-cr/scripts/cli.py review owner/repo 123 --input -
+python3 gh-address-cr/scripts/cli.py findings owner/repo 123 --input -
+python3 gh-address-cr/scripts/cli.py session-engine resolve-local-item owner/repo 123 local-finding:<fingerprint> fix --note "Fixed locally."
+```
+
+## Testing
+
+Run the current automated checks with:
+
+```bash
+python3 -m unittest discover -s tests
+python3 gh-address-cr/scripts/cli.py --help
+python3 gh-address-cr/scripts/cli.py cr-loop --help
+```
+
+Current test layout:
+
+- `tests/test_session_engine_cli.py`
+  - PR session state machine and gate behavior
+- `tests/test_python_wrappers.py`
+  - Python entrypoints for GitHub/local-review flows
+- `tests/test_aux_scripts.py`
+  - helper scripts such as reply generation, batch resolve, and state cleanup
+- `tests/helpers.py`
+  - shared test harness
+
 ## Install with npx skills
 
 ```bash
@@ -78,11 +658,11 @@ npx skills add https://github.com/RbBtSn0w/gh-address-cr-skill --skill gh-addres
 
 ## Breaking changes (2026-04-09)
 
-- `scripts/batch_resolve.sh` now requires an approved list format:
+- `python3 gh-address-cr/scripts/cli.py batch-resolve` now requires an approved list format:
   - one thread per line: `APPROVED <thread_id>`
   - empty lines and `#` comments are allowed
   - raw thread-id lines now fail fast
-- `scripts/list_threads.sh` now uses the latest thread comment as primary context and emits:
+- `python3 gh-address-cr/scripts/cli.py list-threads` now uses the latest thread comment as primary context and emits:
   - `comment_source` (`latest|first|none`)
   - `first_url`, `latest_url`
   - `url`/`body` remain available, now latest-first with fallback
@@ -117,38 +697,196 @@ npx skills update
 
 ## What this skill provides
 
-- Strict per-thread CR handling workflow
+- PR-scoped session state for GitHub threads and local findings
+- Strict per-item CR handling workflow
 - Required evidence format (commit/files/test result)
-- Mandatory final gate (`final_gate.sh`) before completion
-- PR-scoped state tracking to avoid duplicate work
-- Audit log + audit summary + summary hash output
+- Mandatory final gate (`python3 gh-address-cr/scripts/cli.py final-gate`) before completion
+- Session-scoped state tracking to avoid duplicate work
+- Audit log + trace log + audit summary + summary hash output
+- Audit summaries include labeled total, new in this run, unresolved, and handled in this run counts, not just final zero-state gate metrics
+- `python3 gh-address-cr/scripts/cli.py final-gate` also prints the same current-run snapshot in human-readable form before the raw machine diagnostics
+- Python-first implementation with a single CLI entrypoint
+- Module-split automated tests for session, wrappers, and helper scripts
+
+## Repository Layout Model
+
+This git repository is the development and release wrapper around one shipped skill.
+
+- Published skill payload: the entire `gh-address-cr/` directory
+- Repo-level verification harness: `tests/`
+- Repo-level release and contributor files: `.github/`, `pyproject.toml`, `CHANGELOG.md`, root `AGENTS.md`, and other top-level metadata
+
+Path convention:
+
+- Repo-level docs and commands that are executed from repository root use paths like `gh-address-cr/scripts/cli.py`
+- Skill-owned docs inside `gh-address-cr/` use paths relative to the skill root, such as `scripts/cli.py`, `references/...`, and `agents/openai.yaml`
+
+If a rule or instruction must ship with the installed skill, it must live inside `gh-address-cr/`, not only at repository root.
 
 ## Skill folder
 
 - `gh-address-cr/`
   - `SKILL.md`
   - `agents/openai.yaml`
-  - `scripts/*.sh`
+  - `scripts/*.py`
+  - `python3 gh-address-cr/scripts/cli.py` (compat entrypoint)
   - `assets/reply-templates/*`
   - `references/cr-triage-checklist.md`
 
 ## Quick usage after installation
 
 ```bash
-scripts/run_once.sh --audit-id run-YYYYMMDD owner/repo 123
-scripts/post_reply.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> /tmp/reply.md
-scripts/resolve_thread.sh --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
-scripts/final_gate.sh --auto-clean --audit-id run-YYYYMMDD owner/repo 123
+python3 gh-address-cr/scripts/cli.py run-once --audit-id run-YYYYMMDD owner/repo 123
+python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
+python3 gh-address-cr/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
+python3 gh-address-cr/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
+python3 gh-address-cr/scripts/cli.py final-gate --auto-clean --audit-id run-YYYYMMDD owner/repo 123
 ```
+
+## Operating Modes
+
+This skill supports several distinct operating modes. The session model is the same in all of them, but the required commands differ.
+
+### Mode 1: GitHub Thread Only
+
+Use this when the PR already has remote review threads and there is no local AI review input.
+
+Example:
+
+```bash
+python3 gh-address-cr/scripts/cli.py run-once --audit-id run-20260412 owner/repo 123
+
+# inspect one unresolved GitHub thread
+python3 gh-address-cr/scripts/cli.py generate-reply --mode fix --severity P2 "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" abc123 "src/app.py" "python3 -m unittest" "passed" "Added the missing guard."
+python3 gh-address-cr/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
+python3 gh-address-cr/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+
+python3 gh-address-cr/scripts/cli.py final-gate --auto-clean --audit-id run-20260412 owner/repo 123
+```
+
+Rules:
+
+- GitHub thread items require both `python3 gh-address-cr/scripts/cli.py post-reply` and `python3 gh-address-cr/scripts/cli.py resolve-thread`
+- outdated / `STALE` GitHub threads still count as unresolved until explicitly handled
+- `python3 gh-address-cr/scripts/cli.py final-gate` must pass before completion
+
+### Mode 2: GitHub Thread Clarify / Defer
+
+Use this when the review comment is not accepted as a code change and you need to respond with rationale.
+
+Clarify example:
+
+```bash
+python3 gh-address-cr/scripts/cli.py generate-reply --mode clarify "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "The current control flow is intentional because initialization must stay lazy."
+python3 gh-address-cr/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
+python3 gh-address-cr/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+```
+
+Defer example:
+
+```bash
+python3 gh-address-cr/scripts/cli.py generate-reply --mode defer "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md" "This requires broader refactoring and is deferred to a follow-up PR."
+python3 gh-address-cr/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
+python3 gh-address-cr/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-20260412 THREAD_ID
+```
+
+Rules:
+
+- even without code changes, GitHub thread items still require reply plus resolve
+- defer/clarify should carry rationale, not just a status change
+
+### Mode 3: Local Finding Only
+
+Use this when you want to run local AI review without waiting for GitHub or Copilot review comments.
+
+Example:
+
+```bash
+python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
+
+python3 gh-address-cr/scripts/session_engine.py list-items owner/repo 123 --item-kind local_finding --status OPEN
+python3 gh-address-cr/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT ACCEPTED --note "Confirmed locally."
+python3 gh-address-cr/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT FIXED --note "Implemented fix."
+python3 gh-address-cr/scripts/session_engine.py update-item owner/repo 123 local-finding:FINGERPRINT VERIFIED --note "Validated with targeted tests."
+python3 gh-address-cr/scripts/session_engine.py close-item owner/repo 123 local-finding:FINGERPRINT --note "Closed after local validation."
+
+python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean --audit-id run-20260412 owner/repo 123
+```
+
+Rules:
+
+- local findings do not require GitHub reply/resolve unless you choose to publish them
+- they still participate in the same session gate
+- terminal local-item transitions require `--note`
+
+### Mode 4: Mixed Session
+
+Use this when the PR has both remote GitHub threads and local AI findings.
+
+Example:
+
+```bash
+python3 gh-address-cr/scripts/cli.py run-once --audit-id run-20260412 owner/repo 123
+python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
+
+# process GitHub items with reply + resolve
+# process local items through session_engine.py transitions
+
+python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean --audit-id run-20260412 owner/repo 123
+```
+
+Rules:
+
+- GitHub items need reply plus resolve
+- local items need valid state transitions and notes
+- the PR is not clear until both session blocking count and unresolved GitHub thread count are zero
+
+### Mode 5: Publish Local Finding Back To GitHub
+
+Use this when a locally discovered issue should become visible in the GitHub PR discussion.
+
+Example:
+
+```bash
+python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
+python3 gh-address-cr/scripts/session_engine.py list-items owner/repo 123 --item-kind local_finding --status OPEN
+
+python3 gh-address-cr/scripts/cli.py publish-finding --repo owner/repo --pr 123 local-finding:FINGERPRINT
+python3 gh-address-cr/scripts/cli.py run-once --audit-id run-20260412 owner/repo 123
+```
+
+What happens:
+
+- the local finding is published as a GitHub review comment
+- later GitHub sync can associate the local finding with the resulting thread
+- from that point onward, the issue can be handled like a normal GitHub review item
+
+### Mode 6: Direct Session Engine / Unified CLI
+
+Use this when you need low-level session control or when integrating the skill into other automation.
+
+Examples:
+
+```bash
+python3 gh-address-cr/scripts/cli.py run-once owner/repo 123
+python3 gh-address-cr/scripts/cli.py final-gate --no-auto-clean owner/repo 123
+python3 gh-address-cr/scripts/cli.py session-engine list-items owner/repo 123 --item-kind local_finding
+python3 gh-address-cr/scripts/cli.py session-engine reclaim-stale-claims owner/repo 123
+```
+
+Rules:
+
+- `cli.py` is the preferred Python entrypoint for automation
+- `python3 gh-address-cr/scripts/cli.py` remains the stable automation surface for skill users
 
 ## Troubleshooting final gate failure
 
-If `scripts/final_gate.sh` fails:
+If `python3 gh-address-cr/scripts/cli.py final-gate` fails:
 
 1. Read the pending table in terminal output and the printed audit summary path.
-2. For each pending thread, verify both operations were completed: `scripts/post_reply.sh` and `scripts/resolve_thread.sh`.
-3. Re-run `scripts/run_once.sh --show-all ...` to compare unresolved vs handled state.
-4. Resolve remaining threads, then re-run `scripts/final_gate.sh`.
+2. For each pending thread, verify both operations were completed: `python3 gh-address-cr/scripts/cli.py post-reply` and `python3 gh-address-cr/scripts/cli.py resolve-thread`.
+3. Re-run `python3 gh-address-cr/scripts/cli.py run-once --show-all ...` to compare unresolved vs handled state.
+4. Resolve remaining threads, then re-run `python3 gh-address-cr/scripts/cli.py final-gate`.
 
 ## CI semantic release (tag + changelog)
 

@@ -1,10 +1,13 @@
 version: 1
 interface:
   display_name: GH Address CR
-  short_description: Process PR review comments with evidence-first fixes and replies.
+  short_description: Operate a PR-scoped CR control plane with mode and producer selection.
   default_prompt: |
-    Resolve PR CR comments one by one with evidence-first replies.
-    1. For each handled thread, execute BOTH `scripts/post_reply.sh` and `scripts/resolve_thread.sh` (reply-only is incomplete).
-    2. Before any completion statement, run `scripts/final_gate.sh`.
-    3. Require the exact line: Verified: 0 Unresolved Threads found.
-    4. Completion summary must include the gate command, unresolved=0 confirmation, audit summary path, and audit summary sha256.
+    Use `SKILL.md` as the source of truth.
+    1. Select one mode: `remote`, `local`, `mixed`, or `ingest`.
+    2. If local intake is needed, select one producer: `code-review`, `json`, or `adapter`.
+    3. Start with `python3 scripts/cli.py control-plane ...` for one pass, or `python3 scripts/cli.py cr-loop ...` for multi-iteration execution.
+    4. Prefer the default internal fixer path for loop execution; use `--fixer-cmd` only for advanced external integrations.
+    5. GitHub review threads require both reply and resolve.
+    6. Local findings require valid terminal notes.
+    7. Before any completion statement, run `python3 scripts/cli.py final-gate ...` and summarize the current-run queue counts in natural language. Include total, new in this run, unresolved, and handled in this run for both GitHub threads and local findings; prefer the human-readable `Current Run Snapshot` block and use raw machine count lines only as fallback evidence.
