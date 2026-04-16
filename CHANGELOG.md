@@ -1,3 +1,9 @@
+## [1.2.0](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.1.1...v1.2.0) (2026-04-16)
+
+### Features
+
+* upgrade gh-address-cr to a python session workflow ([#2](https://github.com/RbBtSn0w/gh-address-cr-skill/issues/2)) ([f2c153b](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/f2c153b4db443621d3b8e979476dd95c513fe7e9))
+
 ## [1.1.1](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.1.0...v1.1.1) (2026-04-09)
 
 ### Bug Fixes
