@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import session_engine as engine
-from python_common import findings_file, loop_artifact_file, reply_file, run_cmd as common_run_cmd, snapshot_file, validation_file, parse_dispatch, shield_adapter_passthrough, VALID_MODES, VALID_PRODUCERS
+from python_common import findings_file, loop_artifact_file, reply_file, run_cmd as common_run_cmd, snapshot_file, trace_event, validation_file, parse_dispatch, shield_adapter_passthrough, VALID_MODES, VALID_PRODUCERS
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -134,6 +134,21 @@ def update_loop_state(
     if status in {"PASSED", "FAILED", "NEEDS_HUMAN", "BLOCKED"}:
         loop["last_completed_at"] = engine.utc_now()
     _save_if_needed(session, loaded_here=loaded_here, persist=persist)
+    trace_event(
+        "cr-loop-state",
+        status.lower(),
+        repo,
+        pr_number,
+        run_id=run_id,
+        audit_id=run_id,
+        message=f"cr-loop status -> {status}",
+        details={
+            "iteration": iteration,
+            "max_iterations": max_iterations,
+            "current_item_id": current_item_id,
+            "last_error": last_error,
+        },
+    )
 
 
 def record_auto_attempt(
@@ -154,6 +169,21 @@ def record_auto_attempt(
     item["updated_at"] = engine.utc_now()
     item["history"].append(engine.history_event("auto-attempt", failure or action or "auto-attempt", actor="cr-loop"))
     _save_if_needed(session, loaded_here=loaded_here, persist=persist)
+    trace_event(
+        "cr-loop-auto-attempt",
+        "failed" if failure else "ok",
+        repo,
+        pr_number,
+        run_id=session.get("loop_state", {}).get("run_id"),
+        audit_id=session.get("loop_state", {}).get("run_id"),
+        message=f"Auto attempt for {item_id}",
+        details={
+            "item_id": item_id,
+            "action": action,
+            "failure": failure,
+            "auto_attempt_count": item["auto_attempt_count"],
+        },
+    )
 
 
 def mark_needs_human(

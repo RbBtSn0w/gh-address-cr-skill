@@ -475,11 +475,22 @@ The session state is stored in a PR-scoped workspace under the user cache direct
 - GitHub snapshots: `threads.jsonl`
 - handled threads: `handled_threads.txt`
 - audit log: `audit.jsonl`
+- trace log: `trace.jsonl`
 - audit summary: `audit_summary.md`
 - findings: `findings-*.json` and `code-review-findings.json`
 - replies: `reply-*.md`
 - loop requests: `loop-request-*.json`
 - validation records: `validation-*.json`
+
+If `python3 gh-address-cr/scripts/cli.py final-gate --auto-clean` passes, the current PR workspace is archived before deletion under:
+
+- archive root: `archive/<owner>__<repo>/pr-<pr>/<run_id>/`
+
+To inspect one run after the fact, use:
+
+```bash
+python3 gh-address-cr/scripts/audit_report.py --run-id <run_id> <owner/repo> <pr_number>
+```
 
 The session also tracks loop-safety metadata per item:
 
@@ -691,7 +702,7 @@ npx skills update
 - Required evidence format (commit/files/test result)
 - Mandatory final gate (`python3 gh-address-cr/scripts/cli.py final-gate`) before completion
 - Session-scoped state tracking to avoid duplicate work
-- Audit log + audit summary + summary hash output
+- Audit log + trace log + audit summary + summary hash output
 - Python-first implementation with a single CLI entrypoint
 - Module-split automated tests for session, wrappers, and helper scripts
 

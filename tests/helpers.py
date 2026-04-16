@@ -16,6 +16,7 @@ INGEST_FINDINGS_PY = SCRIPTS_DIR / "ingest_findings.py"
 PUBLISH_FINDING_PY = SCRIPTS_DIR / "publish_finding.py"
 RUN_ONCE_PY = SCRIPTS_DIR / "run_once.py"
 FINAL_GATE_PY = SCRIPTS_DIR / "final_gate.py"
+AUDIT_REPORT_PY = SCRIPTS_DIR / "audit_report.py"
 LIST_THREADS_PY = SCRIPTS_DIR / "list_threads.py"
 POST_REPLY_PY = SCRIPTS_DIR / "post_reply.py"
 RESOLVE_THREAD_PY = SCRIPTS_DIR / "resolve_thread.py"
@@ -101,8 +102,14 @@ class PythonScriptTestCase(unittest.TestCase):
     def audit_log_file(self):
         return self.workspace_dir() / "audit.jsonl"
 
+    def trace_log_file(self):
+        return self.workspace_dir() / "trace.jsonl"
+
     def audit_summary_file(self):
         return self.workspace_dir() / "audit_summary.md"
+
+    def archive_root(self):
+        return self.state_dir / "archive" / "octo__example" / f"pr-{self.pr}"
 
     def github_dir(self):
         return self.workspace_dir()

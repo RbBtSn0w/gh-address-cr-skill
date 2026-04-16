@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 from tests.helpers import (
+    AUDIT_REPORT_PY,
     CLI_PY,
     CONTROL_PLANE_PY,
     CODE_REVIEW_ADAPTER_PY,
@@ -2306,6 +2307,98 @@ else:
         result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--auto-clean", self.repo, self.pr])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.workspace_dir().exists())
+
+    def test_final_gate_auto_clean_archives_workspace_before_deleting_it(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--auto-clean", "--audit-id", "archive-run", self.repo, self.pr])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.workspace_dir().exists())
+        self.assertTrue(self.archive_root().exists())
+
+        archived_runs = sorted(self.archive_root().iterdir())
+        self.assertEqual(len(archived_runs), 1)
+        archived_workspace = archived_runs[0]
+        self.assertTrue((archived_workspace / "audit.jsonl").exists())
+        self.assertTrue((archived_workspace / "trace.jsonl").exists())
+        self.assertTrue((archived_workspace / "audit_summary.md").exists())
+        self.assertTrue((archived_workspace / "session.json").exists())
+
+        trace_lines = (archived_workspace / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertTrue(trace_lines)
+        self.assertTrue(any(json.loads(line).get("run_id") == "archive-run" for line in trace_lines if line.strip()))
+
+    def test_audit_report_filters_trace_to_one_run_id(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+if sys.argv[1:3] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': []
+                    }
+                }
+            }
+        }
+    }))
+elif sys.argv[1:3] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif sys.argv[1:3] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
+else:
+    raise SystemExit(f'unhandled gh args: {sys.argv[1:]}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        first = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "run-a", self.repo, self.pr])
+        self.assertEqual(first.returncode, 0, first.stderr)
+        second = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "run-b", self.repo, self.pr])
+        self.assertEqual(second.returncode, 0, second.stderr)
+
+        report = self.run_cmd([sys.executable, str(AUDIT_REPORT_PY), "--run-id", "run-a", self.repo, self.pr])
+        self.assertEqual(report.returncode, 0, report.stderr)
+        self.assertIn("Run: run-a", report.stdout)
+        self.assertIn('"run_id": "run-a"', report.stdout)
+        self.assertIn('"action": "sync-github"', report.stdout)
+        self.assertIn('"action": "gate"', report.stdout)
+        self.assertNotIn('"run_id": "run-b"', report.stdout)
 
     def test_resolve_thread_python_updates_session(self):
         gh = self.bin_dir / "gh"

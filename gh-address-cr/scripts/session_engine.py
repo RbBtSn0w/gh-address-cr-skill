@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ingest_findings import normalize_finding
 
-from python_common import audit_log_file, audit_summary_file, session_file, state_dir
+from python_common import audit_event as write_audit_event, audit_log_file, audit_summary_file, session_file, state_dir
 
 
 SCHEMA_VERSION = 1
@@ -86,18 +86,25 @@ def write_json_atomic(path: Path, payload: dict):
         raise
 
 
-def append_audit_event(repo: str, pr_number: str, action: str, status: str, message: str, details=None):
-    event = {
-        "timestamp": utc_now(),
-        "action": action,
-        "status": status,
-        "repo": repo,
-        "pr": pr_number,
-        "message": message,
-        "details": details or {},
-    }
-    with audit_log_path(repo, pr_number).open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(event, sort_keys=True) + "\n")
+def append_audit_event(
+    repo: str,
+    pr_number: str,
+    action: str,
+    status: str,
+    message: str,
+    details=None,
+    *,
+    run_id: str | None = None,
+):
+    write_audit_event(
+        action,
+        status,
+        repo,
+        pr_number,
+        audit_id=run_id,
+        message=message,
+        details=details,
+    )
 
 
 def default_session(repo: str, pr_number: str) -> dict:
@@ -142,6 +149,20 @@ def ensure_loop_state(session: dict):
     loop_state.setdefault("last_error", "")
     loop_state.setdefault("last_started_at", None)
     loop_state.setdefault("last_completed_at", None)
+
+
+def current_run_id(session: dict, explicit_run_id: str | None = None) -> str | None:
+    if explicit_run_id:
+        return explicit_run_id
+    loop_state = session.get("loop_state")
+    if isinstance(loop_state, dict):
+        run_id = loop_state.get("run_id")
+        if run_id:
+            return run_id
+    scan_id = session.get("current_scan_id")
+    if isinstance(scan_id, str) and scan_id:
+        return scan_id
+    return None
 
 
 def ensure_item_runtime_fields(item: dict):
@@ -429,7 +450,15 @@ def cmd_init(args):
     else:
         session = default_session(args.repo, args.pr_number)
         save_session(session)
-    append_audit_event(args.repo, args.pr_number, "init", "ok", "Initialized PR session", {"session_file": str(path)})
+    append_audit_event(
+        args.repo,
+        args.pr_number,
+        "init",
+        "ok",
+        "Initialized PR session",
+        {"session_file": str(path)},
+        run_id=current_run_id(session),
+    )
     print(f"Initialized session: {path}")
     return 0
 
@@ -451,6 +480,7 @@ def cmd_sync_github(args):
         "ok",
         "Synchronized GitHub review threads",
         {"upserted_count": len(rows), "created_count": created, "scan_id": session["current_scan_id"]},
+        run_id=current_run_id(session),
     )
     print(f"Upserted {len(rows)} GitHub item(s); created {created}.")
     return 0
@@ -505,6 +535,7 @@ def cmd_ingest_local(args):
             "scan_id": session["current_scan_id"],
             "sync_enabled": bool(args.sync),
         },
+        run_id=current_run_id(session),
     )
     print(f"Created {created} local item(s) from {len(findings)} finding(s). Existing active local item(s): {active_local_items}.")
     if args.sync:
@@ -530,7 +561,15 @@ def cmd_claim(args):
     item["blocking"] = True
     item["history"].append(history_event("claimed", f"Claimed by {args.agent}", actor=args.agent))
     save_session(session)
-    append_audit_event(args.repo, args.pr_number, "claim", "ok", "Claimed item", {"item_id": args.item_id, "agent": args.agent})
+    append_audit_event(
+        args.repo,
+        args.pr_number,
+        "claim",
+        "ok",
+        "Claimed item",
+        {"item_id": args.item_id, "agent": args.agent},
+        run_id=current_run_id(session),
+    )
     print(f"Claimed item: {args.item_id} by {args.agent}")
     return 0
 
@@ -579,6 +618,7 @@ def cmd_update_item(args):
         "ok",
         "Updated item status",
         {"item_id": args.item_id, "status": args.status, "actor": args.actor},
+        run_id=current_run_id(session),
     )
     print(f"Updated item: {args.item_id} -> {args.status}")
     return 0
@@ -626,6 +666,7 @@ def cmd_update_items_batch(args):
         "ok",
         "Updated items in batch",
         {"count": len(updates)},
+        run_id=current_run_id(session),
     )
     print(f"Updated {len(updates)} items.")
     return 0
@@ -656,6 +697,7 @@ def cmd_reclaim_stale_claims(args):
         "ok",
         "Reclaimed expired claims",
         {"reclaimed_count": reclaimed},
+        run_id=current_run_id(session),
     )
     print(f"Reclaimed {reclaimed} stale claim(s).")
     return 0
@@ -682,6 +724,7 @@ def cmd_close_item(args):
         "ok",
         "Closed item",
         {"item_id": args.item_id, "actor": args.actor},
+        run_id=current_run_id(session),
     )
     print(f"Closed item: {args.item_id}")
     return 0
@@ -728,6 +771,7 @@ def cmd_resolve_local_item(args):
         "ok",
         "Applied terminal resolution to local finding",
         {"item_id": args.item_id, "resolution": args.resolution, "actor": args.actor},
+        run_id=current_run_id(session),
     )
     print(f"Resolved local item: {args.item_id} -> {item['status']}")
     return 0
@@ -756,6 +800,7 @@ def cmd_mark_published(args):
         "ok",
         "Marked local finding as published",
         {"item_id": args.item_id, "published_ref": args.published_ref, "url": args.url, "actor": args.actor},
+        run_id=current_run_id(session),
     )
     print(f"Marked published: {args.item_id}")
     return 0
@@ -777,6 +822,7 @@ def cmd_mark_handled(args):
         "ok",
         "Marked item handled",
         {"item_id": args.item_id, "actor": args.actor},
+        run_id=current_run_id(session),
     )
     print(f"Marked handled: {args.item_id}")
     return 0
@@ -868,6 +914,7 @@ def cmd_gate(args):
             "summary_file": str(summary),
             "summary_sha256": digest,
         },
+        run_id=current_run_id(session),
     )
     print(f"SESSION GATE {session_gate}")
     print(f"REMOTE GATE {remote_gate}")

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
+import shutil
 import subprocess
 import sys
 import time
@@ -60,8 +62,18 @@ def audit_log_file(repo: str, pr_number: str) -> Path:
     return workspace_dir(repo, pr_number) / "audit.jsonl"
 
 
+def trace_log_file(repo: str, pr_number: str) -> Path:
+    return workspace_dir(repo, pr_number) / "trace.jsonl"
+
+
 def audit_summary_file(repo: str, pr_number: str) -> Path:
     return workspace_dir(repo, pr_number) / "audit_summary.md"
+
+
+def archive_root_dir(repo: str, pr_number: str) -> Path:
+    path = state_dir() / "archive" / normalize_repo(repo) / f"pr-{pr_number}"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def handled_threads_file(repo: str, pr_number: str) -> Path:
@@ -199,7 +211,46 @@ def sha256_of_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def audit_event(action: str, status: str, repo: str, pr_number: str, audit_id: str = "default", message: str = "", details=None):
+def append_jsonl_event(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, sort_keys=True) + "\n")
+
+
+def trace_event(
+    action: str,
+    status: str,
+    repo: str,
+    pr_number: str,
+    *,
+    run_id: str | None = None,
+    audit_id: str | None = None,
+    message: str = "",
+    details=None,
+):
+    entry = {
+        "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "action": action,
+        "status": status,
+        "repo": repo,
+        "pr": pr_number,
+        "run_id": run_id,
+        "audit_id": audit_id,
+        "message": message,
+        "details": details or {},
+    }
+    append_jsonl_event(trace_log_file(repo, pr_number), entry)
+
+
+def audit_event(
+    action: str,
+    status: str,
+    repo: str,
+    pr_number: str,
+    audit_id: str | None = "default",
+    message: str = "",
+    details=None,
+):
     entry = {
         "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "action": action,
@@ -207,11 +258,49 @@ def audit_event(action: str, status: str, repo: str, pr_number: str, audit_id: s
         "repo": repo,
         "pr": pr_number,
         "audit_id": audit_id,
+        "run_id": audit_id,
         "message": message,
         "details": details or {},
     }
-    with audit_log_file(repo, pr_number).open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    append_jsonl_event(audit_log_file(repo, pr_number), entry)
+    trace_event(
+        action,
+        status,
+        repo,
+        pr_number,
+        run_id=audit_id,
+        audit_id=audit_id,
+        message=message,
+        details=details,
+    )
+
+
+def sanitize_run_id(value: str) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-")
+    return sanitized or "run"
+
+
+def reserve_archive_dir(repo: str, pr_number: str, run_id: str) -> Path:
+    root = archive_root_dir(repo, pr_number)
+    safe_run_id = sanitize_run_id(run_id)
+    candidate = root / safe_run_id
+    if not candidate.exists():
+        return candidate
+    suffix = 2
+    while True:
+        fallback = root / f"{safe_run_id}-{suffix}"
+        if not fallback.exists():
+            return fallback
+        suffix += 1
+
+
+def archive_workspace(repo: str, pr_number: str, run_id: str) -> Path:
+    source = workspace_dir(repo, pr_number)
+    if not source.exists():
+        raise SystemExit(f"Workspace not found for archive: {source}")
+    target = reserve_archive_dir(repo, pr_number, run_id)
+    shutil.copytree(source, target)
+    return target
 
 
 TRANSIENT_GH_FAILURE_MARKERS = (

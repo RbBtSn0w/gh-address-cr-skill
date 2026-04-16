@@ -320,6 +320,11 @@ Final output must include:
 4. session blocking items = 0
 5. audit summary path + sha256
 
+For run-scoped diagnostics, use:
+
+- `python3 scripts/audit_report.py --run-id <run_id> <owner/repo> <pr_number>`
+- successful `python3 scripts/cli.py final-gate --auto-clean ...` runs archive the PR workspace before deletion under `archive/<owner>__<repo>/pr-<pr>/<run_id>/`
+
 ## Must-Fix Rule
 
 - Default must-fix: correctness bugs, data loss risks, platform/runtime breakage, packaging/install breakage, P1/P2 regressions.

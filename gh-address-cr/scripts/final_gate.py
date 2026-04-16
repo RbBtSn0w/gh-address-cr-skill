@@ -12,6 +12,7 @@ from python_common import (
     copy_threads_snapshot,
     github_viewer_login,
     list_pending_review_ids,
+    reserve_archive_dir,
     refresh_threads_snapshot,
     session_engine,
     sha256_of_file,
@@ -143,8 +144,19 @@ def main() -> int:
 
     if args.auto_clean:
         workspace = workspace_dir(args.repo, args.pr_number)
-        audit_event("final_gate", "ok", args.repo, args.pr_number, args.audit_id, "Auto-clean completed after gate pass")
+        archive_target = reserve_archive_dir(args.repo, args.pr_number, args.audit_id or "final-gate")
+        audit_event(
+            "final_gate",
+            "ok",
+            args.repo,
+            args.pr_number,
+            args.audit_id,
+            "Archived PR workspace before auto-clean",
+            {"archive_dir": str(archive_target)},
+        )
+        shutil.copytree(workspace, archive_target)
         shutil.rmtree(workspace, ignore_errors=True)
+        print(f"Archived PR workspace: {archive_target}")
         print(f"Auto-cleaned PR workspace: {workspace}")
     return 0
 
