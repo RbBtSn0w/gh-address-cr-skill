@@ -352,7 +352,12 @@ If you omit the producer where it is required:
 - External fixer commands must read a JSON payload from stdin and return JSON:
   - `resolution`: `fix`, `clarify`, or `defer`
   - `note`
-  - `reply_markdown` for GitHub thread items
+  - for GitHub thread `fix`: `fix_reply`
+    - `commit_hash`
+    - `files`
+    - optional `severity`, `why`, `test_command`, `test_result`
+    - `validation_commands` may be used as default validation evidence when `test_command` / `test_result` are omitted
+  - for GitHub thread `clarify` or `defer`: `reply_markdown`
   - optional `validation_commands`
 - `adapter` producer is re-run on each iteration.
 - `json` and `code-review` producers are treated as one-shot inputs for the current review run.
