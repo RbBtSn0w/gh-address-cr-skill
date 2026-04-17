@@ -337,3 +337,48 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertIn("file://.../gh-address-cr/scripts/cli.py", sanitized)
         self.assertIn("https://example.com/file:///docs", sanitized)
         self.assertNotIn("file:///Users/snow/workspace", sanitized)
+
+    def test_submit_feedback_write_failure_sanitizes_error_and_audit_details(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_write_failure_under_test")
+
+        audits = []
+        module.audit_event = lambda *args, **kwargs: audits.append((args, kwargs))
+        module.gh_read_json = lambda *args, **kwargs: []
+        module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            1,
+            "",
+            "token=ghp_abcdefghijklmnopqrstuvwxyz12 path=/Users/snow/private/state.json email=alice@example.com",
+        )
+
+        with patched_argv(
+            [
+                "submit_feedback.py",
+                "--category",
+                "tooling-bug",
+                "--title",
+                "bad response",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+            ]
+        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()):
+            rc = module.main()
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(payload["status"], "failed")
+        self.assertIn("[redacted-token]", payload["error"])
+        self.assertIn("email=[redacted]", payload["error"])
+        self.assertIn(".../private/state.json", payload["error"])
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz12", payload["error"])
+        self.assertNotIn("alice@example.com", payload["error"])
+        self.assertNotIn("/Users/snow/private", payload["error"])
+        self.assertTrue(audits)
+        audit_args, _audit_kwargs = audits[-1]
+        self.assertIn("[redacted-token]", audit_args[6]["error"])
+        self.assertIn("email=[redacted]", audit_args[6]["error"])
+        self.assertIn(".../private/state.json", audit_args[6]["error"])

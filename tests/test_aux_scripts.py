@@ -176,6 +176,40 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertNotIn("/Users/snow", payload["body"])
         self.assertIn("## Additional Notes", payload["body"])
 
+    def test_submit_feedback_sanitizes_title_and_artifacts_in_dry_run(self):
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(SUBMIT_FEEDBACK_PY),
+                "--dry-run",
+                "--category",
+                "tooling-bug",
+                "--title",
+                "/Users/snow/private ghp_abcdefghijklmnopqrstuvwxyz12 alice@example.com",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+                "--artifact",
+                "https://example.com/log?token=ghp_abcdefghijklmnopqrstuvwxyz12&owner=alice@example.com",
+                "--artifact",
+                "/Users/snow/Documents/GitHub/gh-address-cr-skill/tmp/state.json",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "dry-run")
+        self.assertTrue(payload["title"].startswith("[AI Feedback] "))
+        self.assertNotIn("/Users/snow/private", payload["title"])
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz12", payload["title"])
+        self.assertNotIn("alice@example.com", payload["title"])
+        self.assertIn("[redacted-token]", payload["title"])
+        self.assertIn("[redacted-email]", payload["title"])
+        self.assertIn("https://example.com/log?token=[redacted-token]&owner=[redacted-email]", payload["body"])
+        self.assertIn("`.../gh-address-cr-skill/tmp/state.json`", payload["body"])
+
     def test_submit_feedback_posts_issue_via_github_api(self):
         gh = self.bin_dir / "gh"
         request_path = Path(self.temp_dir.name) / "issue_request.json"

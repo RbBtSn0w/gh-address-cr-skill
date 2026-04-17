@@ -45,9 +45,9 @@ TOKEN_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\bBearer\s+[A-Za-z0-9._-]{16,}\b", re.IGNORECASE),
 )
-SECRET_ASSIGNMENT_RE = re.compile(r"(?i)\b(token|secret|password|api[_-]?key)\b([=: ]+)([^\s,;]+)")
+SECRET_ASSIGNMENT_RE = re.compile(r"(?i)\b(token|secret|password|api[_-]?key)\b([=: ]+)([^\s,;&]+)")
 PRIVATE_ASSIGNMENT_RE = re.compile(
-    r"(?i)\b(username|user|email|hostname|host|machine|machine_name|computer|computer_name)\b([=: ]+)([^\s,;]+)"
+    r"(?i)\b(username|user|email|hostname|host|machine|machine_name|computer|computer_name)\b([=: ]+)([^\s,;&]+)"
 )
 VERSION_RE = re.compile(r"^## \[(?P<version>[^\]]+)\]", re.MULTILINE)
 SENSITIVE_VALUE_FLAGS = {
@@ -72,9 +72,9 @@ def normalize_title(value: str) -> str:
     title = value.strip()
     if not title:
         raise SystemExit("--title must not be empty.")
-    if title.startswith("[AI Feedback] "):
-        return title
-    return f"[AI Feedback] {title}"
+    if not title.startswith("[AI Feedback] "):
+        title = f"[AI Feedback] {title}"
+    return sanitize_text(title)
 
 
 def normalize_text(value: str, *, field_name: str) -> str:
@@ -283,7 +283,6 @@ def load_feedback_context(repo: str | None, pr_number: str | None) -> dict:
 
 def merge_context(args: argparse.Namespace, context: dict) -> None:
     machine_summary = context.get("machine_summary") if isinstance(context.get("machine_summary"), dict) else {}
-    session_payload = context.get("session") if isinstance(context.get("session"), dict) else {}
 
     args.status = args.status or machine_summary.get("status") or context.get("loop_status")
     args.reason_code = args.reason_code or machine_summary.get("reason_code")
@@ -294,8 +293,6 @@ def merge_context(args: argparse.Namespace, context: dict) -> None:
 
     artifact_values = [*args.artifact, *context.get("artifacts", [])]
     args.artifact = unique_preserving_order(artifact_values)
-
-    _ = session_payload
 
 
 def bullet_or_default(items: list[str], *, empty_value: str = "- Not provided.") -> list[str]:
@@ -443,7 +440,7 @@ def build_issue_body(args: argparse.Namespace, context: dict, fingerprint: str) 
         "",
         "## Artifacts",
         "",
-        *bullet_or_default([compact_absolute_path(item) for item in args.artifact]),
+        *bullet_or_default([sanitize_text(item) for item in args.artifact]),
         "",
         "## Additional Notes",
         "",
@@ -470,6 +467,13 @@ def format_lookup_error(exc: Exception) -> str:
     if not detail:
         detail = exc.__class__.__name__
     return sanitize_text(f"feedback issue dedupe lookup failed: {detail}")
+
+
+def sanitize_error_message(value: str | None, fallback: str) -> str:
+    sanitized = sanitize_text(value or "").strip()
+    if not sanitized:
+        return fallback
+    return sanitized[:2000]
 
 
 def audit_scope(args: argparse.Namespace) -> tuple[str, str]:
@@ -584,7 +588,7 @@ def main(argv: list[str] | None = None) -> int:
         check=False,
     )
     if result.returncode != 0:
-        payload["error"] = result.stderr or "submit feedback failed"
+        payload["error"] = sanitize_error_message(result.stderr or result.stdout, "submit feedback failed")
         write_feedback_audit(
             args,
             "failed",
