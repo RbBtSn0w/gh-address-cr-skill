@@ -36,6 +36,7 @@ VALID_CATEGORIES = (
 )
 POSIX_ABSOLUTE_PATH_RE = re.compile(r"(?P<prefix>^|[\s([{\"'<=,`])(?P<path>/[^\s`\"')\]}>;,]+)")
 WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"(?P<prefix>^|[\s([{\"'<=,`])(?P<path>[A-Za-z]:\\[^\s`\"')\]}>;,]+)")
+FILE_URI_RE = re.compile(r"(?P<prefix>^|[\s([{\"'<=,`])(?P<scheme>file://)(?P<path>/[^\s`\"')\]}>;,]+)")
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 TOKEN_PATTERNS = (
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
@@ -100,6 +101,10 @@ def compact_absolute_path(value: str) -> str:
         parts = parts[2:]
     elif len(parts) >= 3 and parts[:2] == ["var", "home"]:
         parts = parts[3:]
+    elif len(parts) >= 4 and parts[0] == "mnt" and re.match(r"^[A-Za-z]$", parts[1]) and parts[2] in {"Users", "home"}:
+        parts = parts[4:]
+    elif len(parts) >= 5 and parts[0] == "mnt" and re.match(r"^[A-Za-z]$", parts[1]) and parts[2:4] == ["var", "home"]:
+        parts = parts[5:]
     if not parts:
         return "..."
     return f".../{'/'.join(parts[-3:])}"
@@ -117,6 +122,10 @@ def redact_secret_token(value: str) -> str:
 
 def sanitize_text(value: str) -> str:
     sanitized = redact_secret_token(value)
+    sanitized = FILE_URI_RE.sub(
+        lambda match: f"{match.group('prefix')}{match.group('scheme')}{compact_absolute_path(match.group('path'))}",
+        sanitized,
+    )
     sanitized = POSIX_ABSOLUTE_PATH_RE.sub(
         lambda match: f"{match.group('prefix')}{compact_absolute_path(match.group('path'))}",
         sanitized,

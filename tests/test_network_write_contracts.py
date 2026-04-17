@@ -312,3 +312,28 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertIn(".../workspace/notes.txt", sanitized)
         self.assertNotIn("/Users/snow/workspace", sanitized)
         self.assertNotIn("C:\\Users\\snow\\workspace\\notes.txt", sanitized)
+
+    def test_submit_feedback_sanitize_text_redacts_mounted_home_paths(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_sanitize_text_mounted_path_under_test")
+
+        sanitized = module.sanitize_text(
+            "Mounted path file is /mnt/c/Users/snow/workspace/gh-address-cr/scripts/cli.py "
+            "and build cache is /mnt/c/var/home/snow/tmp/state.json."
+        )
+
+        self.assertIn(".../gh-address-cr/scripts/cli.py", sanitized)
+        self.assertIn(".../tmp/state.json", sanitized)
+        self.assertNotIn("/mnt/c/Users/snow", sanitized)
+        self.assertNotIn("/mnt/c/var/home/snow", sanitized)
+
+    def test_submit_feedback_sanitize_text_redacts_file_uri_paths(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_sanitize_text_file_uri_under_test")
+
+        sanitized = module.sanitize_text(
+            "Local file URI file:///Users/snow/workspace/gh-address-cr/scripts/cli.py "
+            "should be redacted while https://example.com/file:///docs stays intact."
+        )
+
+        self.assertIn("file://.../gh-address-cr/scripts/cli.py", sanitized)
+        self.assertIn("https://example.com/file:///docs", sanitized)
+        self.assertNotIn("file:///Users/snow/workspace", sanitized)
