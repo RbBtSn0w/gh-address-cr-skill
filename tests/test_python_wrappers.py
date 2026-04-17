@@ -2050,15 +2050,9 @@ else:
 
         result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", "--audit-id", "gate-test", self.repo, self.pr])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("== Current Run Snapshot ==", result.stdout)
-        self.assertIn(
-            "GitHub threads: total 1; new in this run 1; unresolved 0; handled in this run 1",
-            result.stdout,
-        )
-        self.assertIn(
-            "Local findings: total 0; new in this run 0; unresolved 0; handled in this run 0",
-            result.stdout,
-        )
+        self.assertNotIn("== Current Run Snapshot ==", result.stdout)
+        self.assertNotIn("GitHub threads: total 1;", result.stdout)
+        self.assertNotIn("Local findings: total 0;", result.stdout)
         self.assertIn("== Gate Result ==", result.stdout)
         self.assertIn("Verified: 0 Unresolved Threads found", result.stdout)
         self.assertIn("Verified: 0 Pending Reviews found", result.stdout)
