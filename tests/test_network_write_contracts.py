@@ -230,7 +230,7 @@ class NetworkWriteContractTest(PythonScriptTestCase):
 
         audits = []
         module.audit_event = lambda *args, **kwargs: audits.append((args, kwargs))
-        module.gh_read_json = lambda *args, **kwargs: []
+        module.gh_read_json = lambda *args, **kwargs: {"items": []}
         module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "not-json", "")
 
         with patched_argv(
@@ -262,7 +262,7 @@ class NetworkWriteContractTest(PythonScriptTestCase):
 
         audits = []
         module.audit_event = lambda *args, **kwargs: audits.append((args, kwargs))
-        module.gh_read_json = lambda *args, **kwargs: []
+        module.gh_read_json = lambda *args, **kwargs: {"items": []}
         module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(
             args[0],
             0,
@@ -398,7 +398,7 @@ class NetworkWriteContractTest(PythonScriptTestCase):
 
         audits = []
         module.audit_event = lambda *args, **kwargs: audits.append((args, kwargs))
-        module.gh_read_json = lambda *args, **kwargs: []
+        module.gh_read_json = lambda *args, **kwargs: {"items": []}
         module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(
             args[0],
             1,

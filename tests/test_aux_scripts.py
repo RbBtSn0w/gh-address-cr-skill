@@ -237,6 +237,36 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz12", payload["body"])
         self.assertNotIn("alice@example.com", payload["body"])
 
+    def test_submit_feedback_sanitizes_review_context_fields_in_dry_run(self):
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(SUBMIT_FEEDBACK_PY),
+                "--dry-run",
+                "--category",
+                "workflow-gap",
+                "--title",
+                "review context redaction",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+                "--using-repo",
+                "/Users/snow/private ghp_abcdefghijklmnopqrstuvwxyz12",
+                "--using-pr",
+                "alice@example.com",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertIn("- Repository under review: `.../private [redacted-token]`", payload["body"])
+        self.assertIn("- Pull request under review: `[redacted-email]`", payload["body"])
+        self.assertNotIn("/Users/snow/private", payload["body"])
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz12", payload["body"])
+        self.assertNotIn("alice@example.com", payload["body"])
+
     def test_submit_feedback_posts_issue_via_github_api(self):
         gh = self.bin_dir / "gh"
         request_path = Path(self.temp_dir.name) / "issue_request.json"
@@ -248,8 +278,8 @@ from pathlib import Path
 
 request_path = Path({str(request_path)!r})
 args = sys.argv[1:]
-if args[:2] == ['api', 'repos/RbBtSn0w/gh-address-cr-skill/issues?state=all&per_page=100&page=1']:
-    print('[]')
+if len(args) >= 2 and args[0] == 'api' and args[1].startswith('search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr-skill+') and args[1].endswith('&per_page=10'):
+    print(json.dumps({{'items': []}}))
 elif args[:4] == ['api', 'repos/RbBtSn0w/gh-address-cr-skill/issues', '--method', 'POST']:
     payload = json.load(sys.stdin)
     request_path.write_text(json.dumps(payload), encoding='utf-8')
@@ -401,10 +431,8 @@ fingerprint_payload = {{
     'failing_command': '',
 }}
 fingerprint = hashlib.sha256(json.dumps(fingerprint_payload, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
-if args[:2] == ['api', 'repos/RbBtSn0w/gh-address-cr-skill/issues?state=all&per_page=100&page=1']:
-    print(json.dumps([{{'number': 88, 'html_url': 'https://github.com/RbBtSn0w/gh-address-cr-skill/issues/88', 'state': 'open', 'body': f'<!-- gh-address-cr-feedback-fingerprint: {{fingerprint}} -->'}}]))
-elif args[:2] == ['api', 'repos/RbBtSn0w/gh-address-cr-skill/issues?state=all&per_page=100&page=2']:
-    print('[]')
+if len(args) >= 2 and args[0] == 'api' and args[1] == f'search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr-skill+is%3Aissue+{{fingerprint}}+in%3Abody&per_page=10':
+    print(json.dumps({{'items': [{{'number': 88, 'html_url': 'https://github.com/RbBtSn0w/gh-address-cr-skill/issues/88', 'state': 'open', 'body': f'<!-- gh-address-cr-feedback-fingerprint: {{fingerprint}} -->'}}]}}))
 elif args[:4] == ['api', 'repos/RbBtSn0w/gh-address-cr-skill/issues', '--method', 'POST']:
     raise SystemExit('create should not be called')
 else:
@@ -436,6 +464,7 @@ else:
         self.assertEqual(payload["issue_number"], 88)
         calls = json.loads(calls_path.read_text(encoding="utf-8"))
         self.assertFalse(any(call[:4] == ["api", "repos/RbBtSn0w/gh-address-cr-skill/issues", "--method", "POST"] for call in calls))
+        self.assertTrue(any(call[:2] == ["api", f"search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr-skill+is%3Aissue+{payload['fingerprint']}+in%3Abody&per_page=10"] for call in calls))
 
     def test_submit_feedback_writes_local_audit_event(self):
         gh = self.bin_dir / "gh"
@@ -447,8 +476,8 @@ import sys
 args = sys.argv[1:]
 if args[:4] == ['api', 'repos/RbBtSn0w/gh-address-cr-skill/issues', '--method', 'POST']:
     print(json.dumps({'number': 322, 'html_url': 'https://github.com/RbBtSn0w/gh-address-cr-skill/issues/322'}))
-elif args[:2] == ['api', 'repos/RbBtSn0w/gh-address-cr-skill/issues?state=all&per_page=100&page=1']:
-    print('[]')
+elif len(args) >= 2 and args[0] == 'api' and args[1].startswith('search/issues?q=repo%3ARbBtSn0w%2Fgh-address-cr-skill+') and args[1].endswith('&per_page=10'):
+    print(json.dumps({'items': []}))
 else:
     raise SystemExit(f'unhandled gh args: {args}')
 """,

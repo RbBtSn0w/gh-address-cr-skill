@@ -190,7 +190,12 @@ The default review entrypoint runs repeated intake, item selection, action execu
 - External fixer commands must read a JSON payload from stdin and return a JSON object containing:
   - `resolution`: `fix`, `clarify`, or `defer`
   - `note`
-  - `reply_markdown` for GitHub thread items
+  - for GitHub thread `fix`: `fix_reply`
+    - `commit_hash`
+    - `files`
+    - optional `severity`, `why`, `test_command`, `test_result`
+    - `validation_commands` may be used as the default validation evidence when `test_command` / `test_result` are omitted
+  - for GitHub thread `clarify` or `defer`: `reply_markdown`
   - optional `validation_commands`
 - `code-review` and `json` producers are consumed once per review run.
 - `adapter` producer is re-run on each iteration.
@@ -302,13 +307,13 @@ Prefer `NEEDS_HUMAN` over speculative fixes when:
 
 ## Agent Feedback
 
-- when the skill itself blocks progress, file a feedback issue against the skill repository before giving up.
-- use feedback issues for skill-level problems such as contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures that are not caused by the repository under review.
-- do not file feedback issues for normal PR findings, code bugs in the target repository, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
-- do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues.
-- prefer safe technical diagnostics such as failing command, exit code, status, `reason_code`, `waiting_on`, `run_id`, and skill version.
-- when `--using-repo` and `--using-pr` are present, `submit_feedback.py` auto-collects local PR-workspace evidence from `last-machine-summary.json`, `session.json`, `audit_summary.md`, and cached PR head SHA when those files exist.
-- repeated feedback is deduplicated by fingerprint; if the same feedback issue is already open, or was closed recently inside the cooldown window, the helper returns the existing issue instead of creating a new one.
+- When the skill itself blocks progress, file a feedback issue against the skill repository before giving up.
+- Use feedback issues for skill-level problems such as contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures that are not caused by the repository under review.
+- Do not file feedback issues for normal PR findings, code bugs in the target repository, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
+- Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues.
+- Prefer safe technical diagnostics such as failing command, exit code, status, `reason_code`, `waiting_on`, `run_id`, and skill version.
+- When `--using-repo` and `--using-pr` are present, `submit_feedback.py` auto-collects local PR-workspace evidence from `last-machine-summary.json`, `session.json`, `audit_summary.md`, and cached PR head SHA when those files exist.
+- Repeated feedback is deduplicated by fingerprint; if the same feedback issue is already open, or was closed recently inside the cooldown window, the helper returns the existing issue instead of creating a new one.
 - Use `python3 scripts/submit_feedback.py` with explicit fields so the body matches the repository issue format:
   - `--category`
   - `--title`

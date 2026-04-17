@@ -9,6 +9,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from python_common import (
     audit_event,
@@ -25,6 +26,7 @@ from python_common import (
 DEFAULT_TARGET_REPO = "RbBtSn0w/gh-address-cr-skill"
 DEFAULT_COOLDOWN_HOURS = 24
 DEFAULT_FEEDBACK_PR = "feedback"
+DEFAULT_FEEDBACK_SEARCH_PAGE_SIZE = 10
 FINGERPRINT_MARKER_PREFIX = "gh-address-cr-feedback-fingerprint:"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VALID_CATEGORIES = (
@@ -371,25 +373,22 @@ def parse_github_time(value: str | None) -> datetime | None:
         return None
 
 
-def list_existing_feedback_issues(target_repo: str) -> list[dict]:
-    issues: list[dict] = []
-    page = 1
-    while True:
-        response = gh_read_json(["api", f"repos/{target_repo}/issues?state=all&per_page=100&page={page}"])
-        if not response:
-            break
-        if not isinstance(response, list):
-            raise SystemExit("Expected a JSON array when listing existing feedback issues.")
-        issues.extend([issue for issue in response if isinstance(issue, dict) and "pull_request" not in issue])
-        page += 1
-    return issues
+def search_existing_feedback_issues(target_repo: str, fingerprint: str) -> list[dict]:
+    query = f"repo:{target_repo} is:issue {fingerprint} in:body"
+    response = gh_read_json(["api", f"search/issues?q={quote_plus(query)}&per_page={DEFAULT_FEEDBACK_SEARCH_PAGE_SIZE}"])
+    if not isinstance(response, dict):
+        raise SystemExit("Expected a JSON object when searching existing feedback issues.")
+    items = response.get("items")
+    if not isinstance(items, list):
+        raise SystemExit("Expected an `items` array when searching existing feedback issues.")
+    return [issue for issue in items if isinstance(issue, dict) and "pull_request" not in issue]
 
 
 def find_existing_feedback_issue(target_repo: str, fingerprint: str, cooldown_hours: int) -> tuple[str | None, dict | None]:
     now = datetime.now(timezone.utc)
     cooldown_cutoff = now - timedelta(hours=cooldown_hours)
     recent_closed_match: dict | None = None
-    for issue in list_existing_feedback_issues(target_repo):
+    for issue in search_existing_feedback_issues(target_repo, fingerprint):
         issue_fingerprint = extract_feedback_fingerprint(str(issue.get("body") or ""))
         if issue_fingerprint != fingerprint:
             continue
@@ -404,9 +403,9 @@ def find_existing_feedback_issue(target_repo: str, fingerprint: str, cooldown_ho
 
 
 def build_issue_body(args: argparse.Namespace, context: dict, fingerprint: str) -> str:
-    repo_context = f"`{args.using_repo}`" if args.using_repo else "Not provided."
-    pr_context = f"`{args.using_pr}`" if args.using_pr else "Not provided."
-    source_command = f"`{args.source_command}`" if args.source_command else "Not provided."
+    repo_context = f"`{sanitize_text(args.using_repo)}`" if args.using_repo else "Not provided."
+    pr_context = f"`{sanitize_text(args.using_pr)}`" if args.using_pr else "Not provided."
+    source_command = f"`{sanitize_text(args.source_command)}`" if args.source_command else "Not provided."
 
     lines = [
         "## Summary",

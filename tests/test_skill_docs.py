@@ -82,8 +82,19 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_skill_documents_agent_feedback_command_and_trigger(self):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("python3 scripts/submit_feedback.py", text)
-        self.assertIn("when the skill itself blocks progress", text)
-        self.assertIn("do not file feedback issues for normal PR findings", text)
+        self.assertIn("When the skill itself blocks progress", text)
+        self.assertIn("Do not file feedback issues for normal PR findings", text)
+        self.assertNotIn("- when the skill itself blocks progress", text)
+
+    def test_skill_documents_structured_fix_reply_contract_for_github_threads(self):
+        skill_text = SKILL_MD.read_text(encoding="utf-8")
+        readme_text = README_MD.read_text(encoding="utf-8")
+        self.assertIn("for GitHub thread `fix`: `fix_reply`", skill_text)
+        self.assertIn("`commit_hash`", skill_text)
+        self.assertIn("`files`", skill_text)
+        self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", skill_text)
+        self.assertIn("for GitHub thread `fix`: `fix_reply`", readme_text)
+        self.assertIn("for GitHub thread `clarify` or `defer`: `reply_markdown`", readme_text)
 
     def test_openai_hint_requires_feedback_issue_when_skill_usage_is_blocked(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
