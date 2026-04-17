@@ -474,6 +474,24 @@ def sanitize_error_message(value: str | None, fallback: str) -> str:
     return sanitized[:2000]
 
 
+def validate_created_issue_response(response: object) -> tuple[int | None, str | None, str | None]:
+    if not isinstance(response, dict):
+        return None, None, "feedback issue response did not contain a JSON object"
+
+    invalid_fields: list[str] = []
+    issue_number = response.get("number")
+    if not isinstance(issue_number, int) or isinstance(issue_number, bool) or issue_number <= 0:
+        invalid_fields.append("number")
+
+    issue_url = response.get("html_url")
+    if not isinstance(issue_url, str) or not issue_url.strip():
+        invalid_fields.append("html_url")
+
+    if invalid_fields:
+        return None, None, f"feedback issue response missing valid {', '.join(invalid_fields)}"
+    return issue_number, issue_url, None
+
+
 def audit_scope(args: argparse.Namespace) -> tuple[str, str]:
     return args.using_repo or args.target_repo, args.using_pr or DEFAULT_FEEDBACK_PR
 
@@ -607,9 +625,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         return emit_result(payload, 1, error_message=payload["error"])
 
+    issue_number, issue_url, response_error = validate_created_issue_response(response)
+    if response_error:
+        payload["error"] = response_error
+        write_feedback_audit(
+            args,
+            "failed",
+            "Feedback issue response missing required fields",
+            {"target_repo": args.target_repo, "fingerprint": fingerprint, "error": payload["error"]},
+        )
+        return emit_result(payload, 1, error_message=payload["error"])
+
     payload["status"] = "succeeded"
-    payload["issue_number"] = response.get("number")
-    payload["issue_url"] = response.get("html_url")
+    payload["issue_number"] = issue_number
+    payload["issue_url"] = issue_url
     write_feedback_audit(
         args,
         "ok",
@@ -617,8 +646,8 @@ def main(argv: list[str] | None = None) -> int:
         {
             "target_repo": args.target_repo,
             "fingerprint": fingerprint,
-            "issue_number": response.get("number"),
-            "issue_url": response.get("html_url"),
+            "issue_number": issue_number,
+            "issue_url": issue_url,
         },
     )
     return emit_result(payload, 0)

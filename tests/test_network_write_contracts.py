@@ -257,6 +257,45 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertTrue(audits)
         self.assertIn("feedback issue response was not valid JSON", stderr.getvalue())
 
+    def test_submit_feedback_rejects_success_response_missing_required_fields(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_missing_fields_under_test")
+
+        audits = []
+        module.audit_event = lambda *args, **kwargs: audits.append((args, kwargs))
+        module.gh_read_json = lambda *args, **kwargs: []
+        module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            0,
+            json.dumps({"id": 321}),
+            "",
+        )
+
+        with patched_argv(
+            [
+                "submit_feedback.py",
+                "--category",
+                "tooling-bug",
+                "--title",
+                "bad response",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+            ]
+        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+            rc = module.main()
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(payload["status"], "failed")
+        self.assertIsNone(payload["issue_number"])
+        self.assertIsNone(payload["issue_url"])
+        self.assertEqual(payload["error"], "feedback issue response missing valid number, html_url")
+        self.assertTrue(audits)
+        self.assertIn("feedback issue response missing valid number, html_url", stderr.getvalue())
+
     def test_submit_feedback_audits_lookup_failure_with_structured_output(self):
         module = self.load_module("submit_feedback.py", "submit_feedback_lookup_failure_under_test")
 
