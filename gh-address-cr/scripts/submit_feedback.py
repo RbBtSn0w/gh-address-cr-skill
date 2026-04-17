@@ -47,7 +47,9 @@ TOKEN_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\bBearer\s+[A-Za-z0-9._-]{16,}\b", re.IGNORECASE),
 )
-SECRET_ASSIGNMENT_RE = re.compile(r"(?i)\b(token|secret|password|api[_-]?key)\b([=: ]+)([^\s,;&]+)")
+SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b((?:[A-Za-z0-9]+[_-])*token|secret|password|api[_-]?key)\b([=: ]+)([^\s,;&]+)"
+)
 PRIVATE_ASSIGNMENT_RE = re.compile(
     r"(?i)\b(username|user|email|hostname|host|machine|machine_name|computer|computer_name)\b([=: ]+)([^\s,;&]+)"
 )

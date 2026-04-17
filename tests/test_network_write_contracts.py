@@ -377,6 +377,23 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertIn("https://example.com/file:///docs", sanitized)
         self.assertNotIn("file:///Users/snow/workspace", sanitized)
 
+    def test_submit_feedback_sanitize_text_redacts_common_token_assignment_variants(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_sanitize_text_token_variants_under_test")
+
+        sanitized = module.sanitize_text(
+            "access_token=supersecret auth-token=hunter2 refresh_token=abc123 "
+            "session token=value should all be redacted."
+        )
+
+        self.assertIn("access_token=[redacted-token]", sanitized)
+        self.assertIn("auth-token=[redacted-token]", sanitized)
+        self.assertIn("refresh_token=[redacted-token]", sanitized)
+        self.assertIn("token=[redacted-token]", sanitized)
+        self.assertNotIn("access_token=supersecret", sanitized)
+        self.assertNotIn("auth-token=hunter2", sanitized)
+        self.assertNotIn("refresh_token=abc123", sanitized)
+        self.assertNotIn("token=value", sanitized)
+
     def test_submit_feedback_sanitize_command_redacts_key_value_tokens_and_file_uri_args(self):
         module = self.load_module("submit_feedback.py", "submit_feedback_sanitize_command_under_test")
 
