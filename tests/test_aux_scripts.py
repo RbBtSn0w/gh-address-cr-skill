@@ -210,6 +210,33 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertIn("https://example.com/log?token=[redacted-token]&owner=[redacted-email]", payload["body"])
         self.assertIn("`.../gh-address-cr-skill/tmp/state.json`", payload["body"])
 
+    def test_submit_feedback_sanitizes_agent_name_in_dry_run(self):
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(SUBMIT_FEEDBACK_PY),
+                "--dry-run",
+                "--category",
+                "tooling-bug",
+                "--agent",
+                "/Users/snow/private ghp_abcdefghijklmnopqrstuvwxyz12 alice@example.com",
+                "--title",
+                "agent redaction",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertIn("- Agent: `.../private [redacted-token] [redacted-email]`", payload["body"])
+        self.assertNotIn("/Users/snow/private", payload["body"])
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz12", payload["body"])
+        self.assertNotIn("alice@example.com", payload["body"])
+
     def test_submit_feedback_posts_issue_via_github_api(self):
         gh = self.bin_dir / "gh"
         request_path = Path(self.temp_dir.name) / "issue_request.json"

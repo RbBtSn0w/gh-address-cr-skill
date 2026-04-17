@@ -138,9 +138,7 @@ def sanitize_text(value: str) -> str:
 
 
 def sanitize_token(token: str) -> str:
-    if token.startswith("/") or is_windows_absolute_path(token):
-        return compact_absolute_path(token)
-    return redact_secret_token(token)
+    return sanitize_text(token)
 
 
 def sanitize_command(value: str | None) -> str | None:
@@ -168,7 +166,7 @@ def sanitize_command(value: str | None) -> str | None:
             if key.lower() in SENSITIVE_VALUE_FLAGS:
                 sanitized_tokens.append(f"{key}=[redacted]")
                 continue
-            sanitized_tokens.append(f"{key}={sanitize_token(raw_value)}")
+            sanitized_tokens.append(sanitize_text(token))
             continue
         sanitized_tokens.append(sanitize_token(token))
     return " ".join(sanitized_tokens)
@@ -429,7 +427,7 @@ def build_issue_body(args: argparse.Namespace, context: dict, fingerprint: str) 
         "",
         "## Reproduction Context",
         "",
-        f"- Agent: `{args.agent}`",
+        f"- Agent: `{sanitize_text(args.agent)}`",
         f"- Skill command: {source_command}",
         f"- Repository under review: {repo_context}",
         f"- Pull request under review: {pr_context}",
