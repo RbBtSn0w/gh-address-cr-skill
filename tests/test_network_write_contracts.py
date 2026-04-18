@@ -257,6 +257,47 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertTrue(audits)
         self.assertIn("feedback issue response was not valid JSON", stderr.getvalue())
 
+    def test_submit_feedback_create_system_exit_returns_structured_failure(self):
+        module = self.load_module("submit_feedback.py", "submit_feedback_create_system_exit_under_test")
+
+        audits = []
+        module.audit_event = lambda *args, **kwargs: audits.append((args, kwargs))
+        module.gh_read_json = lambda *args, **kwargs: {"items": []}
+
+        def failing_gh_write_cmd(*args, **kwargs):
+            raise SystemExit("gh missing at /Users/snow/private/bin/gh token=ghp_secretvalue user=snow@example.com")
+
+        module.gh_write_cmd = failing_gh_write_cmd
+
+        with patched_argv(
+            [
+                "submit_feedback.py",
+                "--category",
+                "tooling-bug",
+                "--title",
+                "create system exit",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+            ]
+        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+            rc = module.main()
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(payload["status"], "failed")
+        self.assertIsNone(payload["issue_number"])
+        self.assertIsNone(payload["issue_url"])
+        self.assertIn("gh missing", payload["error"])
+        self.assertNotIn("/Users/snow/private", payload["error"])
+        self.assertNotIn("ghp_secretvalue", payload["error"])
+        self.assertNotIn("snow@example.com", payload["error"])
+        self.assertTrue(audits)
+        self.assertIn("gh missing", stderr.getvalue())
+
     def test_submit_feedback_rejects_success_response_missing_required_fields(self):
         module = self.load_module("submit_feedback.py", "submit_feedback_missing_fields_under_test")
 

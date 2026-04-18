@@ -599,11 +599,22 @@ def main(argv: list[str] | None = None) -> int:
         return emit_result(payload, 0)
 
     request_payload = {"title": args.title, "body": body}
-    result = gh_write_cmd(
-        ["gh", "api", f"repos/{args.target_repo}/issues", "--method", "POST", "--input", "-"],
-        input_text=json.dumps(request_payload),
-        check=False,
-    )
+    try:
+        result = gh_write_cmd(
+            ["gh", "api", f"repos/{args.target_repo}/issues", "--method", "POST", "--input", "-"],
+            input_text=json.dumps(request_payload),
+            check=False,
+        )
+    except SystemExit as exc:
+        payload["error"] = sanitize_error_message(str(exc), "submit feedback failed")
+        write_feedback_audit(
+            args,
+            "failed",
+            "Feedback issue submission failed",
+            {"target_repo": args.target_repo, "fingerprint": fingerprint, "error": payload["error"]},
+        )
+        return emit_result(payload, 1, error_message=payload["error"])
+
     if result.returncode != 0:
         payload["error"] = sanitize_error_message(result.stderr or result.stdout, "submit feedback failed")
         write_feedback_audit(
