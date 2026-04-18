@@ -522,7 +522,13 @@ def _append_telemetry_export_failure(
             "endpoint": _safe_otlp_endpoint(endpoint) if endpoint else "",
         },
     }
-    append_jsonl_event(trace_path or trace_log_file(repo, pr_number), diagnostic)
+    target_path = trace_path or trace_log_file(repo, pr_number)
+    if trace_path is not None and not target_path.parent.exists():
+        return
+    try:
+        append_jsonl_event(target_path, diagnostic)
+    except OSError:
+        return
 
 
 def _build_otlp_export_request(log_kind: str, entry: dict) -> dict | None:

@@ -2,6 +2,7 @@ import importlib.util
 import gzip
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -1041,6 +1042,35 @@ print("ok")
         self.assertEqual(trace_rows[0]["action"], "review")
         self.assertEqual(trace_rows[1]["action"], "telemetry_export")
         self.assertIn("worker unavailable", trace_rows[1]["message"])
+
+    def test_python_common_trace_event_failure_does_not_recreate_removed_workspace(self):
+        original_env = os.environ.copy()
+        release_export = threading.Event()
+
+        def delayed_failing_urlopen(_request, timeout=None):
+            _ = timeout
+            self.assertTrue(release_export.wait(1.0))
+            raise OSError("worker unavailable")
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        os.environ["OTEL_SERVICE_NAME"] = "gh-address-cr-cli"
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://worker.example/base"
+        os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/json"
+        try:
+            module = self._load_python_common_module()
+            expected_trace_file = module.trace_log_file(self.repo, self.pr)
+            workspace = expected_trace_file.parent
+            with patch("urllib.request.urlopen", side_effect=delayed_failing_urlopen):
+                module.trace_event("review", "ok", self.repo, self.pr, message="Handled threads")
+                shutil.rmtree(workspace)
+                release_export.set()
+                self.assertTrue(self._wait_until(lambda: not workspace.exists()))
+                time.sleep(0.05)
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+        self.assertFalse(workspace.exists())
 
     def test_python_common_audit_event_keeps_local_contract_and_exports_audit_and_trace(self):
         original_env = os.environ.copy()
