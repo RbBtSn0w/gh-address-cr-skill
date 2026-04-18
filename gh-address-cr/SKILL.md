@@ -309,10 +309,12 @@ Prefer `NEEDS_HUMAN` over speculative fixes when:
 ## Agent Feedback
 
 - When the skill itself blocks progress, file a feedback issue against the skill repository before giving up.
+- By default, feedback issues are filed to `RbBtSn0w/gh-address-cr-skill`. Override `--target-repo` only when the skill owner explicitly directs you to use a different feedback repository.
 - Use feedback issues for skill-level problems such as contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures that are not caused by the repository under review.
 - Do not file feedback issues for normal PR findings, code bugs in the target repository, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
 - Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues.
 - Prefer safe technical diagnostics such as failing command, exit code, status, `reason_code`, `waiting_on`, `run_id`, and skill version.
+- For PR-scoped feedback, always provide `--using-repo` and `--using-pr` so the issue body names the repository and pull request under review. If they are omitted, `submit_feedback.py` will try to infer them from `--source-command` or `--failing-command`, but explicit values are preferred.
 - When `--using-repo` and `--using-pr` are present, `submit_feedback.py` auto-collects local PR-workspace evidence from `last-machine-summary.json`, `session.json`, `audit_summary.md`, and cached PR head SHA when those files exist.
 - Repeated feedback is deduplicated by fingerprint; if the same feedback issue is already open, or was closed recently inside the cooldown window, the helper returns the existing issue instead of creating a new one.
 - Use `python3 scripts/submit_feedback.py` with explicit fields so the body matches the repository issue format:

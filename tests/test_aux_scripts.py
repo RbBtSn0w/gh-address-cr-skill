@@ -280,6 +280,31 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz12", payload["body"])
         self.assertNotIn("alice@example.com", payload["body"])
 
+    def test_submit_feedback_infers_review_context_from_source_command_when_missing(self):
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(SUBMIT_FEEDBACK_PY),
+                "--dry-run",
+                "--category",
+                "workflow-gap",
+                "--title",
+                "infer review context",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+                "--source-command",
+                "python3 scripts/cli.py review octo/example 77",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertIn("- Repository under review: `octo/example`", payload["body"])
+        self.assertIn("- Pull request under review: `77`", payload["body"])
+
     def test_submit_feedback_posts_issue_via_github_api(self):
         gh = self.bin_dir / "gh"
         request_path = Path(self.temp_dir.name) / "issue_request.json"
