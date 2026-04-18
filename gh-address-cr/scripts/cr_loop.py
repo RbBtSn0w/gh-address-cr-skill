@@ -445,7 +445,8 @@ def build_github_fix_reply(action: dict, item: dict, validation_commands: object
     severity = str(fix_reply.get("severity") or item.get("severity") or "P2").strip().upper()
     why = str(fix_reply.get("why") or "Addressed the CR with minimal targeted changes and regression coverage.").strip()
     test_command = str(fix_reply.get("test_command") or " && ".join(normalized_validation_commands)).strip()
-    test_result = str(fix_reply.get("test_result") or ("passed" if test_command else "")).strip()
+    derived_test_result = "passed" if normalized_validation_commands else ""
+    test_result = str(fix_reply.get("test_result") or derived_test_result).strip()
     if not test_command:
         return None, "GitHub fix actions require fix_reply.test_command or validation_commands."
     if not test_result:

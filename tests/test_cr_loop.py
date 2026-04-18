@@ -833,6 +833,94 @@ else:
         self.assertEqual(captured["commands"], ["python3 -m unittest tests.test_cr_loop", "123"])
         self.assertIn("`python3 -m unittest tests.test_cr_loop && 123`", captured["reply_body"])
 
+    def test_handle_batch_github_fix_requires_test_result_when_only_test_command_is_provided(self):
+        module = self.load_module()
+        item_id = "github-thread:THREAD_FIX_MISSING_TEST_RESULT"
+        session = {
+            "schema_version": 1,
+            "repo": self.repo,
+            "pr_number": self.pr,
+            "items": {
+                item_id: {
+                    "item_id": item_id,
+                    "item_kind": "github_thread",
+                    "origin_ref": "THREAD_FIX_MISSING_TEST_RESULT",
+                    "title": "Require explicit test_result",
+                    "body": "The fixer should not infer a passing result from a raw test command string alone.",
+                    "path": "src/missing_test_result.py",
+                    "line": 31,
+                    "severity": "P2",
+                    "status": "OPEN",
+                    "decision": None,
+                    "blocking": True,
+                    "handled": False,
+                    "handled_at": None,
+                    "resolution_note": None,
+                    "published": True,
+                    "published_ref": "https://example.test/thread/missing-test-result",
+                    "url": "https://example.test/thread/missing-test-result",
+                    "first_url": "https://example.test/thread/missing-test-result",
+                    "latest_url": "https://example.test/thread/missing-test-result",
+                    "is_outdated": False,
+                    "scan_id": None,
+                    "introduced_in_sha": None,
+                    "last_seen_in_sha": None,
+                    "claimed_by": None,
+                    "claimed_at": None,
+                    "lease_expires_at": None,
+                    "repeat_count": 0,
+                    "reopen_count": 0,
+                    "evidence": [],
+                    "history": [],
+                    "auto_attempt_count": 0,
+                    "last_auto_action": None,
+                    "last_auto_failure": None,
+                    "needs_human": False,
+                    "reply_posted": False,
+                    "reply_url": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }
+            },
+        }
+        self.session_file().parent.mkdir(parents=True, exist_ok=True)
+        self.session_file().write_text(json.dumps(session), encoding="utf-8")
+
+        def fake_run_fixer(_cmd: str, _payload: dict):
+            return (
+                {
+                    "resolution": "fix",
+                    "note": "Updated the code path.",
+                    "fix_reply": {
+                        "commit_hash": "feed123",
+                        "files": ["src/missing_test_result.py"],
+                        "test_command": "python3 -m unittest tests.test_cr_loop",
+                    },
+                    "validation_commands": [],
+                },
+                "",
+            )
+
+        module.run_fixer = fake_run_fixer
+        module.emit = lambda _result: None
+        args = types.SimpleNamespace(fixer_cmd="fixer", validation_cmd=[], max_iterations=3)
+
+        with patch.dict(os.environ, {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}):
+            status, error = module.handle_batch(
+                args,
+                self.repo,
+                self.pr,
+                [session["items"][item_id]],
+                run_id="batch-missing-test-result",
+                iteration=1,
+            )
+
+        self.assertEqual(status, "needs_human")
+        self.assertIn("test_result", error)
+        updated = json.loads(self.session_file().read_text(encoding="utf-8"))["items"][item_id]
+        self.assertTrue(updated["needs_human"])
+        self.assertFalse(updated["reply_posted"])
+
     def test_cr_loop_local_json_fix_passes_gate(self):
         findings_file = Path(self.temp_dir.name) / "findings.json"
         findings_file.write_text(
