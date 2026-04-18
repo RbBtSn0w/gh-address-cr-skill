@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+import gzip
 import json
 import os
 import platform
@@ -10,11 +11,18 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SESSION_ENGINE = SCRIPT_DIR / "session_engine.py"
 _GITHUB_VIEWER_LOGIN: str | None = None
+OTLP_HTTP_JSON_PROTOCOL = "http/json"
+DEFAULT_OTLP_TIMEOUT_SECONDS = 3.0
+DEFAULT_OTLP_COMPRESSION = "gzip"
+DEFAULT_OTLP_SERVICE_NAME = "gh-address-cr-cli"
+DEFAULT_PUBLIC_OTLP_RELAY_ENDPOINT = "https://gh-address-cr.hamiltonsnow.workers.dev"
 
 
 def state_dir() -> Path:
@@ -221,6 +229,228 @@ def append_jsonl_event(path: Path, payload: dict) -> None:
         handle.write(json.dumps(payload, sort_keys=True) + "\n")
 
 
+def _parse_otlp_key_value_pairs(value: str) -> dict[str, str]:
+    if not value.strip():
+        return {}
+    pairs: dict[str, str] = {}
+    for raw_item in value.split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise ValueError(f"Invalid OTLP key/value pair: {item}")
+        key, raw_pair_value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError("Invalid OTLP key/value pair: empty key")
+        pairs[key] = urllib_parse.unquote(raw_pair_value.strip())
+    return pairs
+
+
+def _otlp_logs_protocol() -> str:
+    protocol = (
+        os.environ.get("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL")
+        or os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL")
+        or OTLP_HTTP_JSON_PROTOCOL
+    )
+    if protocol != OTLP_HTTP_JSON_PROTOCOL:
+        raise ValueError(f"Unsupported OTLP logs protocol: {protocol}. Only {OTLP_HTTP_JSON_PROTOCOL} is supported.")
+    return protocol
+
+
+def _normalize_otlp_logs_endpoint(value: str, *, signal_specific: bool) -> str:
+    parsed = urllib_parse.urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"Invalid OTLP logs endpoint: {value}")
+    path = parsed.path or "/"
+    if signal_specific:
+        normalized_path = path or "/"
+    elif path in {"", "/"}:
+        normalized_path = "/v1/logs"
+    else:
+        normalized_path = f"{path.rstrip('/')}/v1/logs"
+    return urllib_parse.urlunparse(parsed._replace(path=normalized_path, fragment=""))
+
+
+def _otlp_logs_endpoint() -> str | None:
+    logs_endpoint = (os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") or "").strip()
+    base_endpoint = (os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") or "").strip()
+    if logs_endpoint:
+        return _normalize_otlp_logs_endpoint(logs_endpoint, signal_specific=True)
+    if base_endpoint:
+        return _normalize_otlp_logs_endpoint(base_endpoint, signal_specific=False)
+    return _normalize_otlp_logs_endpoint(DEFAULT_PUBLIC_OTLP_RELAY_ENDPOINT, signal_specific=False)
+
+
+def _otlp_logs_headers() -> dict[str, str]:
+    raw_headers = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_HEADERS")
+    if raw_headers is None:
+        raw_headers = os.environ.get("OTEL_EXPORTER_OTLP_HEADERS", "")
+    return _parse_otlp_key_value_pairs(raw_headers)
+
+
+def _otlp_logs_timeout_seconds() -> float:
+    raw_timeout = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_TIMEOUT")
+    if raw_timeout is None:
+        raw_timeout = os.environ.get("OTEL_EXPORTER_OTLP_TIMEOUT", "")
+    if not raw_timeout.strip():
+        return DEFAULT_OTLP_TIMEOUT_SECONDS
+    try:
+        timeout_ms = int(raw_timeout)
+    except ValueError as exc:
+        raise ValueError(f"Invalid OTLP timeout: {raw_timeout}") from exc
+    if timeout_ms <= 0:
+        raise ValueError(f"Invalid OTLP timeout: {raw_timeout}")
+    return timeout_ms / 1000.0
+
+
+def _otlp_logs_compression() -> str:
+    compression = (
+        os.environ.get("OTEL_EXPORTER_OTLP_LOGS_COMPRESSION")
+        or os.environ.get("OTEL_EXPORTER_OTLP_COMPRESSION")
+        or DEFAULT_OTLP_COMPRESSION
+    )
+    if compression not in {"gzip", "none"}:
+        raise ValueError(f"Unsupported OTLP logs compression: {compression}")
+    return compression
+
+
+def _otlp_resource_attributes() -> list[dict]:
+    raw_attributes = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
+    resource_attributes = _parse_otlp_key_value_pairs(raw_attributes)
+    service_name = (os.environ.get("OTEL_SERVICE_NAME") or "").strip()
+    if service_name:
+        resource_attributes["service.name"] = service_name
+    else:
+        resource_attributes.setdefault("service.name", DEFAULT_OTLP_SERVICE_NAME)
+    return [{"key": key, "value": {"stringValue": value}} for key, value in sorted(resource_attributes.items())]
+
+
+def _otlp_string_attribute(key: str, value: str | None) -> dict | None:
+    if value is None or value == "":
+        return None
+    return {"key": key, "value": {"stringValue": value}}
+
+
+def _otlp_severity_text(status: str) -> str:
+    lowered = status.lower()
+    if lowered in {"failed", "error", "rejected", "unknown"}:
+        return "ERROR"
+    if lowered in {"blocked", "waiting", "warn"}:
+        return "WARN"
+    return "INFO"
+
+
+def _otlp_time_unix_nano(timestamp: str) -> str:
+    return str(int(datetime.fromisoformat(timestamp).timestamp() * 1_000_000_000))
+
+
+def _otlp_log_record(log_kind: str, entry: dict) -> dict:
+    attributes = [
+        _otlp_string_attribute("gh.address_cr.log_kind", log_kind),
+        _otlp_string_attribute("gh.address_cr.action", str(entry.get("action") or "")),
+        _otlp_string_attribute("gh.address_cr.status", str(entry.get("status") or "")),
+        _otlp_string_attribute("gh.address_cr.repo", str(entry.get("repo") or "")),
+        _otlp_string_attribute("gh.address_cr.pr", str(entry.get("pr") or "")),
+        _otlp_string_attribute("gh.address_cr.run_id", str(entry.get("run_id") or "")),
+        _otlp_string_attribute("gh.address_cr.audit_id", str(entry.get("audit_id") or "")),
+    ]
+    details = entry.get("details")
+    if details:
+        attributes.append(
+            {
+                "key": "gh.address_cr.details_json",
+                "value": {"stringValue": json.dumps(details, sort_keys=True, separators=(",", ":"))},
+            }
+        )
+    message = str(entry.get("message") or f"{entry.get('action', '')}:{entry.get('status', '')}")
+    return {
+        "timeUnixNano": _otlp_time_unix_nano(str(entry["timestamp"])),
+        "observedTimeUnixNano": _otlp_time_unix_nano(str(entry["timestamp"])),
+        "severityText": _otlp_severity_text(str(entry.get("status") or "")),
+        "body": {"stringValue": message},
+        "attributes": [attribute for attribute in attributes if attribute is not None],
+    }
+
+
+def _build_otlp_logs_payload(log_kind: str, entry: dict) -> dict:
+    return {
+        "resourceLogs": [
+            {
+                "resource": {
+                    "attributes": _otlp_resource_attributes(),
+                },
+                "scopeLogs": [
+                    {
+                        "scope": {
+                            "name": "gh-address-cr",
+                        },
+                        "logRecords": [
+                            _otlp_log_record(log_kind, entry),
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def _safe_otlp_endpoint(endpoint: str) -> str:
+    parsed = urllib_parse.urlparse(endpoint)
+    return urllib_parse.urlunparse(parsed._replace(query="", fragment=""))
+
+
+def _append_telemetry_export_failure(repo: str, pr_number: str, log_kind: str, entry: dict, endpoint: str | None, error: str) -> None:
+    diagnostic = {
+        "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "action": "telemetry_export",
+        "status": "error",
+        "repo": repo,
+        "pr": pr_number,
+        "run_id": entry.get("run_id"),
+        "audit_id": entry.get("audit_id"),
+        "message": f"OTLP log export failed for {log_kind}: {error}",
+        "details": {
+            "log_kind": log_kind,
+            "source_action": entry.get("action"),
+            "source_status": entry.get("status"),
+            "endpoint": _safe_otlp_endpoint(endpoint) if endpoint else "",
+        },
+    }
+    append_jsonl_event(trace_log_file(repo, pr_number), diagnostic)
+
+
+def _export_otlp_log(log_kind: str, entry: dict) -> None:
+    endpoint: str | None = None
+    try:
+        endpoint = _otlp_logs_endpoint()
+        if not endpoint:
+            return
+        _otlp_logs_protocol()
+        payload = json.dumps(_build_otlp_logs_payload(log_kind, entry), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "gh-address-cr/otel-http-json",
+        }
+        compression = _otlp_logs_compression()
+        if compression == "gzip":
+            payload = gzip.compress(payload)
+            headers["Content-Encoding"] = "gzip"
+        headers.update(_otlp_logs_headers())
+        request = urllib_request.Request(endpoint, data=payload, headers=headers, method="POST")
+        with urllib_request.urlopen(request, timeout=_otlp_logs_timeout_seconds()) as response:
+            response.read()
+    except Exception as exc:
+        _append_telemetry_export_failure(
+            str(entry.get("repo") or ""),
+            str(entry.get("pr") or ""),
+            log_kind,
+            entry,
+            endpoint,
+            str(exc) or exc.__class__.__name__,
+        )
+
+
 def trace_event(
     action: str,
     status: str,
@@ -244,6 +474,7 @@ def trace_event(
         "details": details or {},
     }
     append_jsonl_event(trace_log_file(repo, pr_number), entry)
+    _export_otlp_log("trace", entry)
 
 
 def audit_event(
@@ -267,6 +498,7 @@ def audit_event(
         "details": details or {},
     }
     append_jsonl_event(audit_log_file(repo, pr_number), entry)
+    _export_otlp_log("audit", entry)
     trace_event(
         action,
         status,

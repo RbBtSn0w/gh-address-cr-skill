@@ -24,7 +24,8 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
         try:
-            spec.loader.exec_module(module)
+            with patch.dict("os.environ", {"GH_ADDRESS_CR_STATE_DIR": str(self.state_dir)}, clear=False):
+                spec.loader.exec_module(module)
         finally:
             sys.path.pop(0)
         return module
