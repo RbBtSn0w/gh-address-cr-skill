@@ -187,6 +187,16 @@ def parse_pr_url(value: str) -> tuple[str, str] | None:
     return f"{match.group('owner')}/{match.group('repo')}", match.group("pr_number")
 
 
+def is_probable_repo_slug(value: str) -> bool:
+    if not REPO_SLUG_RE.match(value):
+        return False
+    if value.startswith(("./", "../", "/")):
+        return False
+    if value.endswith((".py", ".sh", ".bash", ".zsh")):
+        return False
+    return True
+
+
 def infer_review_context_from_command(value: str | None) -> tuple[str | None, str | None]:
     if not value:
         return None, None
@@ -199,7 +209,7 @@ def infer_review_context_from_command(value: str | None) -> tuple[str | None, st
         if parsed is not None:
             return parsed
     for index, token in enumerate(tokens[:-1]):
-        if not REPO_SLUG_RE.match(token):
+        if not is_probable_repo_slug(token):
             continue
         pr_number = tokens[index + 1]
         if pr_number.isdigit():

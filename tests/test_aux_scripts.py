@@ -305,6 +305,31 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertIn("- Repository under review: `octo/example`", payload["body"])
         self.assertIn("- Pull request under review: `77`", payload["body"])
 
+    def test_submit_feedback_does_not_infer_review_context_from_script_path_tokens(self):
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(SUBMIT_FEEDBACK_PY),
+                "--dry-run",
+                "--category",
+                "workflow-gap",
+                "--title",
+                "ignore script path token",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+                "--source-command",
+                "python3 scripts/cli.py 123",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertIn("- Repository under review: Not provided.", payload["body"])
+        self.assertIn("- Pull request under review: Not provided.", payload["body"])
+
     def test_submit_feedback_posts_issue_via_github_api(self):
         gh = self.bin_dir / "gh"
         request_path = Path(self.temp_dir.name) / "issue_request.json"
