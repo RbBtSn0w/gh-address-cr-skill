@@ -1,3 +1,9 @@
+## [1.4.0](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.3.0...v1.4.0) (2026-04-18)
+
+### Features
+
+* add hosted telemetry relay and fix replies ([#4](https://github.com/RbBtSn0w/gh-address-cr-skill/issues/4)) ([ab85d07](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/ab85d07cae0c43e0641758282e5a032e238dced1))
+
 ## [1.3.0](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.2.0...v1.3.0) (2026-04-18)
 
 ### Features
