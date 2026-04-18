@@ -47,7 +47,9 @@ TOKEN_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\bBearer\s+[A-Za-z0-9._-]{16,}\b", re.IGNORECASE),
 )
-SECRET_ASSIGNMENT_RE = re.compile(r"(?i)\b(token|secret|password|api[_-]?key)\b([=: ]+)([^\s,;&]+)")
+SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b((?:[A-Za-z0-9]+[_-])*token|secret|password|api[_-]?key)\b([=: ]+)([^\s,;&]+)"
+)
 PRIVATE_ASSIGNMENT_RE = re.compile(
     r"(?i)\b(username|user|email|hostname|host|machine|machine_name|computer|computer_name)\b([=: ]+)([^\s,;&]+)"
 )
@@ -164,7 +166,7 @@ def sanitize_command(value: str | None) -> str | None:
             expects_sensitive_value = True
             continue
         if "=" in token:
-            key, raw_value = token.split("=", 1)
+            key, _ = token.split("=", 1)
             if key.lower() in SENSITIVE_VALUE_FLAGS:
                 sanitized_tokens.append(f"{key}=[redacted]")
                 continue
@@ -597,11 +599,21 @@ def main(argv: list[str] | None = None) -> int:
         return emit_result(payload, 0)
 
     request_payload = {"title": args.title, "body": body}
-    result = gh_write_cmd(
-        ["gh", "api", f"repos/{args.target_repo}/issues", "--method", "POST", "--input", "-"],
-        input_text=json.dumps(request_payload),
-        check=False,
-    )
+    try:
+        result = gh_write_cmd(
+            ["gh", "api", f"repos/{args.target_repo}/issues", "--method", "POST", "--input", "-"],
+            input_text=json.dumps(request_payload),
+            check=False,
+        )
+    except SystemExit as exc:
+        payload["error"] = sanitize_error_message(str(exc), "submit feedback failed")
+        write_feedback_audit(
+            args,
+            "failed",
+            "Feedback issue submission failed",
+            {"target_repo": args.target_repo, "fingerprint": fingerprint, "error": payload["error"]},
+        )
+        return emit_result(payload, 1, error_message=payload["error"])
     if result.returncode != 0:
         payload["error"] = sanitize_error_message(result.stderr or result.stdout, "submit feedback failed")
         write_feedback_audit(
