@@ -587,7 +587,7 @@ else:
         self.assertEqual(summary["item_kind"], "local_finding")
         self.assertTrue(summary["item_id"].startswith("local-finding:"))
         self.assertIn("loop-request-", summary["artifact_path"])
-        self.assertIn("Address the finding", summary["next_action"])
+        self.assertIn("Address the finding by running: `python3 scripts/cli.py submit-action", summary["next_action"])
         self.assertEqual(summary["reason_code"], "WAITING_FOR_FIX")
         self.assertEqual(summary["waiting_on"], "human_fix")
 
@@ -716,7 +716,7 @@ else:
         self.assertEqual(summary["exit_code"], 5)
         self.assertEqual(summary["item_kind"], "local_finding")
         self.assertTrue(summary["item_id"].startswith("local-finding:"))
-        self.assertIn("Address the finding", summary["next_action"])
+        self.assertIn("Address the finding by running: `python3 scripts/cli.py submit-action", summary["next_action"])
         self.assertEqual(summary["reason_code"], "WAITING_FOR_FIX")
         self.assertEqual(summary["waiting_on"], "human_fix")
 

@@ -920,7 +920,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("cr-loop PAUSED: Interaction Required")
                 print("------------------------------------")
                 print(f"Artifact to Address: {error}")
-                print("Next Step: Address the finding and run the command again.")
+                print(f"Next Step: Address the finding by running: `python3 scripts/cli.py submit-action {error} --resolution <fix|clarify|defer> --note <note> ... -- python3 scripts/cli.py {shlex.join(sys.argv[1:])}`")
                 print(f"cr-loop INTERNAL_FIXER_REQUIRED artifact={error}")
                 return BLOCKED_EXIT
             if status == "needs_human":

@@ -40,6 +40,7 @@ COMMAND_TO_SCRIPT = {
     "clean-state": "clean_state.py",
     "session-engine": "session_engine.py",
     "submit-feedback": "submit_feedback.py",
+    "submit-action": "submit_action.py",
 }
 
 HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter"}
@@ -139,6 +140,15 @@ def alias_help(command: str) -> str:
             "Use global --human/--machine before `adapter` to change wrapper output mode.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
             "--machine remains a compatibility alias for the default machine summary.\n"
+        )
+
+    if command == "submit-action":
+        return (
+            "usage: cli.py submit-action <loop_request_path> --resolution {fix,clarify,defer} --note <text> ... [resume_cmd...]\n\n"
+            "High-level manual action entrypoint.\n\n"
+            "Use when the loop stops in WAITING_FOR_FIX and asks for a manual resolution.\n"
+            "This command writes the chosen action to a payload and then optionally resumes the loop.\n"
+            "If resume_cmd is omitted, it prints instructions for resuming.\n"
         )
     return ""
 
@@ -315,7 +325,7 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
     elif status == "BLOCKED" and ("Internal fixer action required:" in combined_error or "Interaction Required" in combined_error):
         reason_code = "WAITING_FOR_FIX"
         waiting_on = "human_fix"
-        next_action = f"Address the finding in {artifact_path} and rerun {command}."
+        next_action = f"Address the finding by running: `python3 scripts/cli.py submit-action {artifact_path} --resolution <fix|clarify|defer> --note <note> ... -- python3 scripts/cli.py {command} {repo} {pr_number}`"
     elif status == "BLOCKED":
         reason_code = "BLOCKED"
         waiting_on = "manual_intervention"
