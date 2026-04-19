@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         return result.returncode
 
     print(f"Action '{args.resolution}' formulated for {item.get('item_id')}.")
-    print(f"To resume the PR session, run your original loop command and append:")
+    print("To resume the PR session, run your original loop command and append:")
     print(f"  --fixer-cmd \"{script_path}\"")
     return 0
 
