@@ -280,6 +280,56 @@ class AuxiliaryScriptsTest(PythonScriptTestCase):
         self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz12", payload["body"])
         self.assertNotIn("alice@example.com", payload["body"])
 
+    def test_submit_feedback_infers_review_context_from_source_command_when_missing(self):
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(SUBMIT_FEEDBACK_PY),
+                "--dry-run",
+                "--category",
+                "workflow-gap",
+                "--title",
+                "infer review context",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+                "--source-command",
+                "python3 scripts/cli.py review octo/example 77",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertIn("- Repository under review: `octo/example`", payload["body"])
+        self.assertIn("- Pull request under review: `77`", payload["body"])
+
+    def test_submit_feedback_does_not_infer_review_context_from_script_path_tokens(self):
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(SUBMIT_FEEDBACK_PY),
+                "--dry-run",
+                "--category",
+                "workflow-gap",
+                "--title",
+                "ignore script path token",
+                "--summary",
+                "summary",
+                "--expected",
+                "expected",
+                "--actual",
+                "actual",
+                "--source-command",
+                "python3 scripts/cli.py 123",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertIn("- Repository under review: Not provided.", payload["body"])
+        self.assertIn("- Pull request under review: Not provided.", payload["body"])
+
     def test_submit_feedback_posts_issue_via_github_api(self):
         gh = self.bin_dir / "gh"
         request_path = Path(self.temp_dir.name) / "issue_request.json"
@@ -910,6 +960,43 @@ print("ok")
         self.assertEqual(request["headers"]["Content-type"], "application/json")
         self.assertEqual(request["headers"]["Content-encoding"], "gzip")
         self.assertNotIn("Authorization", request["headers"])
+
+    def test_python_common_trace_event_skips_otlp_export_when_disabled_by_env(self):
+        original_env = os.environ.copy()
+        captured: list[dict] = []
+
+        def fake_urlopen(request, timeout):
+            captured.append({"url": request.full_url, "timeout": timeout})
+            raise AssertionError("OTLP export should be disabled")
+
+        os.environ["GH_ADDRESS_CR_STATE_DIR"] = str(self.state_dir)
+        os.environ["GH_ADDRESS_CR_DISABLE_OTLP_EXPORT"] = "1"
+        for key in (
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+            "OTEL_RESOURCE_ATTRIBUTES",
+            "OTEL_SERVICE_NAME",
+        ):
+            os.environ.pop(key, None)
+        try:
+            module = self._load_python_common_module()
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                module.trace_event("review", "ok", self.repo, self.pr, message="Handled threads")
+                time.sleep(0.05)
+            trace_rows = [
+                json.loads(line)
+                for line in module.trace_log_file(self.repo, self.pr).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+        self.assertEqual(captured, [])
+        self.assertEqual(len(trace_rows), 1)
+        self.assertEqual(trace_rows[0]["action"], "review")
 
     def test_python_common_trace_event_uses_logs_endpoint_as_is(self):
         original_env = os.environ.copy()

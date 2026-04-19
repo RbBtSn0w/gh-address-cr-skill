@@ -29,6 +29,10 @@ DEFAULT_FEEDBACK_PR = "feedback"
 DEFAULT_FEEDBACK_SEARCH_PAGE_SIZE = 10
 FINGERPRINT_MARKER_PREFIX = "gh-address-cr-feedback-fingerprint:"
 REPO_ROOT = Path(__file__).resolve().parents[2]
+PR_URL_RE = re.compile(
+    r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<pr_number>\d+)(?:[/?#].*)?$"
+)
+REPO_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 VALID_CATEGORIES = (
     "workflow-gap",
     "tooling-bug",
@@ -174,6 +178,55 @@ def sanitize_command(value: str | None) -> str | None:
             continue
         sanitized_tokens.append(sanitize_token(token))
     return " ".join(sanitized_tokens)
+
+
+def parse_pr_url(value: str) -> tuple[str, str] | None:
+    match = PR_URL_RE.match(value)
+    if not match:
+        return None
+    return f"{match.group('owner')}/{match.group('repo')}", match.group("pr_number")
+
+
+def is_probable_repo_slug(value: str) -> bool:
+    if not REPO_SLUG_RE.match(value):
+        return False
+    if value.startswith(("./", "../", "/")):
+        return False
+    if value.endswith((".py", ".sh", ".bash", ".zsh")):
+        return False
+    return True
+
+
+def infer_review_context_from_command(value: str | None) -> tuple[str | None, str | None]:
+    if not value:
+        return None, None
+    try:
+        tokens = shlex.split(value)
+    except ValueError:
+        tokens = value.split()
+    for token in tokens:
+        parsed = parse_pr_url(token)
+        if parsed is not None:
+            return parsed
+    for index, token in enumerate(tokens[:-1]):
+        if not is_probable_repo_slug(token):
+            continue
+        pr_number = tokens[index + 1]
+        if pr_number.isdigit():
+            return token, pr_number
+    return None, None
+
+
+def infer_review_context(args: argparse.Namespace) -> None:
+    for command in (args.source_command, args.failing_command):
+        repo, pr_number = infer_review_context_from_command(command)
+        if repo and not args.using_repo:
+            args.using_repo = repo
+        if pr_number and not args.using_pr:
+            if not args.using_repo or not repo or args.using_repo == repo:
+                args.using_pr = pr_number
+        if args.using_repo and args.using_pr:
+            return
 
 
 def unique_preserving_order(values: list[str]) -> list[str]:
@@ -503,8 +556,11 @@ def write_feedback_audit(args: argparse.Namespace, status: str, message: str, de
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Create a structured AI-agent feedback issue for gh-address-cr-skill.")
-    parser.add_argument("--target-repo", default=DEFAULT_TARGET_REPO)
+    parser = argparse.ArgumentParser(
+        description="Create a structured AI-agent feedback issue for gh-address-cr-skill.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--target-repo", default=DEFAULT_TARGET_REPO, help="GitHub repository that receives skill feedback issues.")
     parser.add_argument("--agent", default="ai-agent")
     parser.add_argument("--audit-id", default="default")
     parser.add_argument("--cooldown-hours", type=int, default=DEFAULT_COOLDOWN_HOURS)
@@ -521,8 +577,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--waiting-on")
     parser.add_argument("--run-id")
     parser.add_argument("--skill-version")
-    parser.add_argument("--using-repo")
-    parser.add_argument("--using-pr")
+    parser.add_argument("--using-repo", help="Repository under review for PR-scoped feedback.")
+    parser.add_argument(
+        "--using-pr",
+        help="Pull request under review for PR-scoped feedback. If omitted, the script tries to infer both values from --source-command or --failing-command.",
+    )
     parser.add_argument("--artifact", action="append", default=[])
     parser.add_argument("--notes")
     parser.add_argument("--dry-run", action="store_true")
@@ -542,6 +601,7 @@ def main(argv: list[str] | None = None) -> int:
     args.actual = normalize_text(args.actual, field_name="--actual")
     args.source_command = sanitize_command(args.source_command)
     args.failing_command = sanitize_command(args.failing_command)
+    infer_review_context(args)
 
     context = load_feedback_context(args.using_repo, args.using_pr)
     merge_context(args, context)

@@ -87,6 +87,8 @@ class SkillDocumentationContractTest(unittest.TestCase):
         text = SKILL_MD.read_text(encoding="utf-8")
         self.assertIn("python3 scripts/submit_feedback.py", text)
         self.assertIn("When the skill itself blocks progress", text)
+        self.assertIn("`RbBtSn0w/gh-address-cr-skill`", text)
+        self.assertIn("`--using-repo` and `--using-pr`", text)
         self.assertIn("Do not file feedback issues for normal PR findings", text)
         self.assertNotIn("- when the skill itself blocks progress", text)
 
@@ -103,11 +105,13 @@ class SkillDocumentationContractTest(unittest.TestCase):
     def test_openai_hint_requires_feedback_issue_when_skill_usage_is_blocked(self):
         text = OPENAI_HINT_YAML.read_text(encoding="utf-8")
         self.assertIn("run `python3 scripts/submit_feedback.py`", text)
+        self.assertIn("`RbBtSn0w/gh-address-cr-skill`", text)
         self.assertIn("contradictory instructions", text)
         self.assertIn("missing automation", text)
         self.assertIn("WAITING_FOR_EXTERNAL_REVIEW", text)
         self.assertIn("expected wait states", text)
         self.assertIn("Do not include usernames, emails, tokens, machine names, or absolute local paths", text)
+        self.assertIn("Always provide `--using-repo` and `--using-pr`", text)
 
     def test_repo_issue_template_documents_ai_agent_feedback_fields(self):
         text = AGENT_FEEDBACK_ISSUE_TEMPLATE.read_text(encoding="utf-8")
@@ -223,6 +227,11 @@ class SkillDocumentationContractTest(unittest.TestCase):
         self.assertIn("Short generic:", readme_text)
         self.assertIn("Explicit `$code-review` producer:", readme_text)
         self.assertIn("Any external review producer:", readme_text)
+
+    def test_readme_documents_feedback_target_repo_and_source_fields(self):
+        readme_text = README_MD.read_text(encoding="utf-8")
+        self.assertIn("`RbBtSn0w/gh-address-cr-skill`", readme_text)
+        self.assertIn("`--using-repo` and `--using-pr`", readme_text)
 
     def test_readme_moves_input_and_producer_routing_to_advanced_section(self):
         readme_text = README_MD.read_text(encoding="utf-8")

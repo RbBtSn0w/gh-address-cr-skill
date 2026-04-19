@@ -218,10 +218,12 @@ Ready-to-use prompt variants:
 
 When the skill itself blocks progress, file a feedback issue in this repository instead of silently dropping the problem.
 
+- By default, feedback issues are filed to `RbBtSn0w/gh-address-cr-skill`. Override `--target-repo` only when the skill owner explicitly directs you to use a different feedback repository.
 - Use feedback issues for skill-level problems such as contradictory instructions, missing automation, documentation gaps, or repeatable tooling failures that are not caused by the repository under review.
 - Do not file feedback issues for normal PR findings, target-repository bugs, or expected wait states such as `WAITING_FOR_EXTERNAL_REVIEW`.
 - Do not include usernames, emails, tokens, machine names, or absolute local paths in feedback issues.
 - Prefer safe technical diagnostics such as failing command, exit code, status, `reason_code`, `waiting_on`, `run_id`, and skill version.
+- For PR-scoped feedback, always provide `--using-repo` and `--using-pr` so the issue body names the repository and pull request under review. If they are omitted, `submit_feedback.py` will try to infer them from `--source-command` or `--failing-command`, but explicit values are preferred.
 - When `--using-repo` and `--using-pr` are provided, the helper auto-collects the latest local evidence from the PR workspace when available:
   - `last-machine-summary.json`
   - `session.json`
