@@ -563,6 +563,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    # Re-normalize: repo and pr_number should be back in args.args for sub-scripts
+    full_args = list(args.args)
+    if args.pr_number:
+        full_args = [args.pr_number, *full_args]
+    if args.repo:
+        full_args = [args.repo, *full_args]
+    args.args = full_args
+
     if args.command == "submit-action":
         if args.args and args.args[0] in {"-h", "--help"}:
             print(alias_help(args.command), end="")
