@@ -40,9 +40,10 @@ COMMAND_TO_SCRIPT = {
     "clean-state": "clean_state.py",
     "session-engine": "session_engine.py",
     "submit-feedback": "submit_feedback.py",
+    "submit-action": "submit_action.py",
 }
 
-HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter"}
+HIGH_LEVEL_COMMANDS = {"review", "threads", "findings", "adapter", "submit-action"}
 OUTPUT_FLAGS = {"--machine", "--human"}
 HIGH_LEVEL_GH_COMMANDS = {"review", "threads", "adapter"}
 INPUT_REQUIRED_COMMANDS = {"findings"}
@@ -69,7 +70,7 @@ def normalize_output_args(args: argparse.Namespace) -> bool:
         print("--machine and --human are mutually exclusive.", file=sys.stderr)
         return False
     if args.command not in HIGH_LEVEL_COMMANDS and requested_flags:
-        print("--machine and --human are only supported for review, threads, findings, and adapter.", file=sys.stderr)
+        print(f"--machine and --human are only supported for {', '.join(sorted(HIGH_LEVEL_COMMANDS))}.", file=sys.stderr)
         return False
     args.machine = "--machine" in requested_flags
     args.human = "--human" in requested_flags
@@ -139,6 +140,15 @@ def alias_help(command: str) -> str:
             "Use global --human/--machine before `adapter` to change wrapper output mode.\n"
             "Default output is a structured JSON summary. Use --human for narrative text.\n"
             "--machine remains a compatibility alias for the default machine summary.\n"
+        )
+
+    if command == "submit-action":
+        return (
+            "usage: cli.py submit-action <loop_request_path> --resolution {fix,clarify,defer} --note <text> ... [resume_cmd...]\n\n"
+            "High-level manual action entrypoint.\n\n"
+            "Use when the loop stops in WAITING_FOR_FIX and asks for a manual resolution.\n"
+            "This command writes the chosen action to a payload and then optionally resumes the loop.\n"
+            "If resume_cmd is omitted, it prints instructions for resuming.\n"
         )
     return ""
 
@@ -315,7 +325,7 @@ def build_machine_summary(command: str, repo: str, pr_number: str, result: subpr
     elif status == "BLOCKED" and ("Internal fixer action required:" in combined_error or "Interaction Required" in combined_error):
         reason_code = "WAITING_FOR_FIX"
         waiting_on = "human_fix"
-        next_action = f"Address the finding in {artifact_path} and rerun {command}."
+        next_action = f"Address the finding by running: `python3 {sys.argv[0]} submit-action {artifact_path} --resolution <fix|clarify|defer> --note <note> ... -- python3 {sys.argv[0]} {command} {repo} {pr_number}`"
     elif status == "BLOCKED":
         reason_code = "BLOCKED"
         waiting_on = "manual_intervention"
@@ -528,7 +538,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        metavar="{review,threads,findings,adapter,review-to-findings,submit-feedback}",
+        metavar="{review,threads,findings,adapter,review-to-findings,submit-feedback,submit-action}",
         help=(
             "High-level commands:\n"
             "  cli.py review owner/repo 123 [--human]\n"
@@ -545,12 +555,40 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  review-to-findings accepts fixed finding blocks only, not arbitrary Markdown.\n"
         ),
     )
+    parser.add_argument("repo", nargs="?", help="Owner/repo name.")
+    parser.add_argument("pr_number", nargs="?", help="Pull request number.")
     parser.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed through to the selected subcommand.")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    # Re-normalize: repo and pr_number should be back in args.args for sub-scripts
+    full_args = list(args.args)
+    if args.pr_number:
+        full_args = [args.pr_number, *full_args]
+    if args.repo:
+        full_args = [args.repo, *full_args]
+    args.args = full_args
+
+    if args.command == "submit-action":
+        if args.args and args.args[0] in {"-h", "--help"}:
+            print(alias_help(args.command), end="")
+            return 0
+        script_path = SCRIPT_DIR / "submit_action.py"
+        cmd = [sys.executable, str(script_path)]
+        if args.machine:
+            cmd.append("--machine")
+        if args.human:
+            cmd.append("--human")
+        passthrough = []
+        if args.repo:
+            passthrough.append(args.repo)
+        if args.pr_number:
+            passthrough.append(args.pr_number)
+        passthrough.extend(args.args)
+        return subprocess.run(cmd + passthrough).returncode
+
     if args.command not in COMMAND_TO_SCRIPT:
         supported_commands = ", ".join(sorted(COMMAND_TO_SCRIPT))
         print(f"Unknown command. Supported commands: {supported_commands}.", file=sys.stderr)

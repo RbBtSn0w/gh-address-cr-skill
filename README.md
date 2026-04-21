@@ -833,6 +833,7 @@ python3 gh-address-cr/scripts/cli.py run-once --audit-id run-YYYYMMDD owner/repo
 python3 gh-address-cr/scripts/cli.py run-local-review --source local-agent:codex owner/repo 123 ./adapter.sh
 python3 gh-address-cr/scripts/cli.py post-reply --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id> "$GH_ADDRESS_CR_STATE_DIR/owner__repo/pr-123/reply.md"
 python3 gh-address-cr/scripts/cli.py resolve-thread --repo owner/repo --pr 123 --audit-id run-YYYYMMDD <thread_id>
+python3 gh-address-cr/scripts/cli.py submit-action <loop_request_path> --resolution fix --note "Fixed it" -- <resume_command>
 python3 gh-address-cr/scripts/cli.py final-gate --auto-clean --audit-id run-YYYYMMDD owner/repo 123
 ```
 
