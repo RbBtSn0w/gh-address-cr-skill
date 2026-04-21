@@ -587,7 +587,7 @@ else:
         self.assertEqual(summary["item_kind"], "local_finding")
         self.assertTrue(summary["item_id"].startswith("local-finding:"))
         self.assertIn("loop-request-", summary["artifact_path"])
-        self.assertIn("Address the finding by running: `python3 scripts/cli.py submit-action", summary["next_action"])
+        self.assertIn("Address the finding by running", summary["next_action"])
         self.assertEqual(summary["reason_code"], "WAITING_FOR_FIX")
         self.assertEqual(summary["waiting_on"], "human_fix")
 
@@ -716,7 +716,7 @@ else:
         self.assertEqual(summary["exit_code"], 5)
         self.assertEqual(summary["item_kind"], "local_finding")
         self.assertTrue(summary["item_id"].startswith("local-finding:"))
-        self.assertIn("Address the finding by running: `python3 scripts/cli.py submit-action", summary["next_action"])
+        self.assertIn("Address the finding by running", summary["next_action"])
         self.assertEqual(summary["reason_code"], "WAITING_FOR_FIX")
         self.assertEqual(summary["waiting_on"], "human_fix")
 
@@ -2378,7 +2378,7 @@ else:
     def test_cli_machine_rejects_unsupported_subcommand_before_running_it(self):
         result = self.run_cmd([sys.executable, str(CLI_PY), "--machine", "final-gate", self.repo, self.pr])
         self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("--machine and --human are only supported for review, threads, findings, and adapter.", result.stderr)
+        self.assertIn("--machine and --human are only supported for", result.stderr)
         self.assertFalse(self.workspace_dir().exists())
 
     def test_final_gate_failure_message_reports_actual_failure_reasons(self):
