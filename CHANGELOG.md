@@ -1,3 +1,9 @@
+## [1.5.0](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.4.1...v1.5.0) (2026-04-21)
+
+### Features
+
+* add submit-action public command for recovering from WAITING_FOR_FIX ([#7](https://github.com/RbBtSn0w/gh-address-cr-skill/issues/7)) ([aad1af4](https://github.com/RbBtSn0w/gh-address-cr-skill/commit/aad1af48df7103165d7959e5fcc07b1368cdfc96))
+
 ## [1.4.1](https://github.com/RbBtSn0w/gh-address-cr-skill/compare/v1.4.0...v1.4.1) (2026-04-19)
 
 ### Bug Fixes
