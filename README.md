@@ -9,6 +9,7 @@ It now treats a Pull Request as the session root and can ingest both:
 
 Both become session items that move through one evidence-first workflow with a final gate.
 For handled GitHub threads, replying and resolving are still two separate required operations.
+`final-gate` now also verifies that every terminal GitHub thread has durable reply evidence, not only that unresolved-thread count reached zero.
 
 ## Public Interface
 
@@ -516,6 +517,7 @@ The implementation model is now:
 - `python3 gh-address-cr/scripts/cli.py final-gate` evaluates both:
   - session blocking item count
   - unresolved GitHub thread count
+  - terminal GitHub thread reply-evidence count
   - current-login pending review count
 
 The session state is stored in a PR-scoped workspace under the user cache directory:
@@ -861,8 +863,9 @@ python3 gh-address-cr/scripts/cli.py final-gate --auto-clean --audit-id run-2026
 Rules:
 
 - GitHub thread items require both `python3 gh-address-cr/scripts/cli.py post-reply` and `python3 gh-address-cr/scripts/cli.py resolve-thread`
+- `python3 gh-address-cr/scripts/cli.py resolve-thread` rejects silent resolve attempts when reply evidence is missing
 - outdated / `STALE` GitHub threads still count as unresolved until explicitly handled
-- `python3 gh-address-cr/scripts/cli.py final-gate` must pass before completion
+- `python3 gh-address-cr/scripts/cli.py final-gate` must pass before completion and now fails if a terminal GitHub thread has no reply evidence
 
 ### Mode 2: GitHub Thread Clarify / Defer
 
@@ -888,6 +891,7 @@ Rules:
 
 - even without code changes, GitHub thread items still require reply plus resolve
 - defer/clarify should carry rationale, not just a status change
+- low-level resolve paths are intentionally blocked until reply evidence exists in the session or the same action posts a fresh reply
 
 ### Mode 3: Local Finding Only
 
@@ -972,15 +976,16 @@ Rules:
 
 - `cli.py` is the preferred Python entrypoint for automation
 - `python3 gh-address-cr/scripts/cli.py` remains the stable automation surface for skill users
+- low-level resolve helpers are stricter than before: `resolve-thread` and batch resolve flows refuse resolve-only handling when reply evidence is absent
 
 ## Troubleshooting final gate failure
 
 If `python3 gh-address-cr/scripts/cli.py final-gate` fails:
 
 1. Read the pending table in terminal output and the printed audit summary path.
-2. For each pending thread, verify both operations were completed: `python3 gh-address-cr/scripts/cli.py post-reply` and `python3 gh-address-cr/scripts/cli.py resolve-thread`.
+2. For each pending or invalid terminal thread, verify both operations were completed: `python3 gh-address-cr/scripts/cli.py post-reply` and `python3 gh-address-cr/scripts/cli.py resolve-thread`.
 3. Re-run `python3 gh-address-cr/scripts/cli.py run-once --show-all ...` to compare unresolved vs handled state.
-4. Resolve remaining threads, then re-run `python3 gh-address-cr/scripts/cli.py final-gate`.
+4. If the summary reports missing reply evidence, post the reply first, then resolve the thread again before re-running `python3 gh-address-cr/scripts/cli.py final-gate`.
 
 ## CI semantic release (tag + changelog)
 

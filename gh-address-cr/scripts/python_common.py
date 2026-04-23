@@ -152,6 +152,37 @@ def github_pr_cache_file(repo: str, pr_number: str) -> Path:
     return workspace_dir(repo, pr_number) / "github_pr_cache.json"
 
 
+def load_session_payload(repo: str, pr_number: str) -> dict:
+    path = session_file(repo, pr_number)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def item_has_reply_evidence(item: dict | None) -> bool:
+    if not isinstance(item, dict):
+        return False
+    reply_url = item.get("reply_url")
+    return bool(item.get("reply_posted")) and isinstance(reply_url, str) and bool(reply_url.strip())
+
+
+def github_thread_reply_evidence(repo: str, pr_number: str, thread_id: str, *, require_tracked: bool = False) -> tuple[bool, str]:
+    session = load_session_payload(repo, pr_number)
+    items = session.get("items")
+    if not isinstance(items, dict):
+        return (False, f"GitHub thread {thread_id} is not tracked in session state.") if require_tracked else (True, "")
+    item = items.get(f"github-thread:{thread_id}")
+    if not isinstance(item, dict):
+        return (False, f"GitHub thread {thread_id} is not tracked in session state.") if require_tracked else (True, "")
+    if item_has_reply_evidence(item):
+        return True, ""
+    return False, f"GitHub thread {thread_id} is missing reply evidence; post a reply before resolving it."
+
+
 class PullRequestReadCache:
     def __init__(self, repo: str, pr_number: str):
         self.repo = repo
@@ -874,8 +905,76 @@ def session_engine(args: list[str], *, input_text: str | None = None, check: boo
     return run_cmd([sys.executable, str(SESSION_ENGINE), *args], input_text=input_text, check=check)
 
 
+def _comment_nodes(connection: dict | None) -> list[dict]:
+    if not isinstance(connection, dict):
+        return []
+    nodes = connection.get("nodes")
+    return list(nodes) if isinstance(nodes, list) else []
+
+
+def _comment_page_state(connection: dict | None) -> tuple[bool, str | None]:
+    if not isinstance(connection, dict):
+        return False, None
+    page_info = connection.get("pageInfo")
+    if not isinstance(page_info, dict):
+        return False, None
+    cursor = page_info.get("endCursor")
+    return bool(page_info.get("hasNextPage")), cursor if isinstance(cursor, str) and cursor else None
+
+
+def _load_thread_comments(thread_id: str, initial_connection: dict | None) -> list[dict]:
+    comments = _comment_nodes(initial_connection)
+    has_next_page, cursor = _comment_page_state(initial_connection)
+    if not has_next_page:
+        return comments
+
+    query = """query($threadId:ID!,$after:String){
+  node(id:$threadId){
+    ... on PullRequestReviewThread{
+      comments(first:100, after:$after){
+        pageInfo{ hasNextPage endCursor }
+        nodes{ url author{ login } }
+      }
+    }
+  }
+}"""
+    seen_cursors: set[str | None] = set()
+    while has_next_page and cursor not in seen_cursors:
+        seen_cursors.add(cursor)
+        cmd = ["api", "graphql", "-f", f"query={query}", "-F", f"threadId={thread_id}"]
+        if cursor:
+            cmd.extend(["-F", f"after={cursor}"])
+        response = gh_read_json(cmd)
+        node = ((response.get("data", {}) or {}).get("node", {}) or {})
+        comment_connection = node.get("comments") if isinstance(node, dict) else {}
+        comments.extend(_comment_nodes(comment_connection))
+        has_next_page, cursor = _comment_page_state(comment_connection)
+    return comments
+
+
+def _viewer_reply_evidence(comments: list[dict], viewer_login: str) -> tuple[bool, str | None]:
+    if not viewer_login:
+        return False, None
+    viewer_reply_url = None
+    # The first thread comment is the original review comment, not reply evidence.
+    for comment in comments[1:]:
+        if not isinstance(comment, dict):
+            continue
+        author = comment.get("author")
+        author_login = author.get("login") if isinstance(author, dict) else None
+        comment_url = comment.get("url")
+        if author_login == viewer_login and isinstance(comment_url, str) and comment_url.strip():
+            viewer_reply_url = comment_url
+    return bool(viewer_reply_url), viewer_reply_url
+
+
 def list_threads(repo: str, pr_number: str) -> list[dict]:
     owner, name = repo.split("/", 1)
+    try:
+        viewer_login = github_viewer_login()
+    except Exception:
+        # Reply-evidence enrichment is best-effort; listing threads must still work when login lookup is unavailable.
+        viewer_login = ""
     query = """query($owner:String!,$name:String!,$number:Int!,$after:String){
   repository(owner:$owner,name:$name){
     pullRequest(number:$number){
@@ -887,6 +986,10 @@ def list_threads(repo: str, pr_number: str) -> list[dict]:
           isOutdated
           path
           line
+          comments(first:100){
+            pageInfo{ hasNextPage endCursor }
+            nodes{ url author{ login } }
+          }
           firstComment: comments(first:1){ nodes{ url body } }
           latestComment: comments(last:1){ nodes{ url body } }
         }
@@ -904,10 +1007,15 @@ def list_threads(repo: str, pr_number: str) -> list[dict]:
         response = gh_read_json(cmd)
         review_threads = response["data"]["repository"]["pullRequest"]["reviewThreads"]
         for node in review_threads["nodes"]:
+            has_comment_connection = isinstance(node, dict) and isinstance(node.get("comments"), dict)
+            comment_connection = node.get("comments") if has_comment_connection else None
+            comments = _load_thread_comments(node["id"], comment_connection) if has_comment_connection else []
             latest = (node.get("latestComment", {}) or {}).get("nodes", [])
             first = (node.get("firstComment", {}) or {}).get("nodes", [])
             latest_node = latest[0] if latest else {}
             first_node = first[0] if first else {}
+            viewer_reply_checked = bool(viewer_login) and has_comment_connection
+            viewer_replied, viewer_reply_url = _viewer_reply_evidence(comments, viewer_login)
             threads.append(
                 {
                     "id": node["id"],
@@ -922,6 +1030,9 @@ def list_threads(repo: str, pr_number: str) -> list[dict]:
                     "latest_url": latest_node.get("url"),
                     "first_body": first_node.get("body"),
                     "latest_body": latest_node.get("body"),
+                    "viewer_reply_checked": viewer_reply_checked,
+                    "viewer_replied": viewer_replied,
+                    "viewer_reply_url": viewer_reply_url,
                 }
             )
         if not review_threads["pageInfo"]["hasNextPage"]:

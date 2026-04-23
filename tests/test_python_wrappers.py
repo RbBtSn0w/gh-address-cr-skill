@@ -1172,8 +1172,12 @@ if args[:2] == ['api', 'graphql']:
                             'isOutdated': False,
                             'path': 'src/gate.py',
                             'line': 4,
+                            'comments': {{'nodes': [
+                                {{'url': 'https://example.test/thread/gate', 'body': 'gate', 'author': {{'login': 'reviewer'}}}},
+                                {{'url': 'https://example.test/thread/gate#reply', 'body': 'handled', 'author': {{'login': 'agent-login'}}}},
+                            ]}},
                             'firstComment': {{'nodes': [{{'url': 'https://example.test/thread/gate', 'body': 'gate'}}]}},
-                            'latestComment': {{'nodes': [{{'url': 'https://example.test/thread/gate', 'body': 'gate'}}]}},
+                            'latestComment': {{'nodes': [{{'url': 'https://example.test/thread/gate#reply', 'body': 'handled'}}]}},
                         }}]
                     }}
                 }}
@@ -2029,8 +2033,12 @@ if args[:2] == ['api', 'graphql']:
                             'isOutdated': False,
                             'path': 'src/a.py',
                             'line': 4,
+                            'comments': {'nodes': [
+                                {'url': 'https://example.test/thread/done', 'body': 'Done', 'author': {'login': 'reviewer'}},
+                                {'url': 'https://example.test/thread/done#reply', 'body': 'Handled', 'author': {'login': 'agent-login'}},
+                            ]},
                             'firstComment': {'nodes': [{'url': 'https://example.test/thread/done', 'body': 'Done'}]},
-                            'latestComment': {'nodes': [{'url': 'https://example.test/thread/done', 'body': 'Done'}]},
+                            'latestComment': {'nodes': [{'url': 'https://example.test/thread/done#reply', 'body': 'Handled'}]},
                         }]
                     }
                 }
@@ -2068,6 +2076,55 @@ else:
         self.assertIn("local_findings_unresolved_count=0", result.stdout)
         self.assertIn("Audit summary file:", result.stdout)
 
+    def test_final_gate_python_fails_on_resolved_thread_without_viewer_reply(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+
+if args[:2] == ['api', 'graphql']:
+    print(json.dumps({
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'reviewThreads': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': [{
+                            'id': 'THREAD_DONE',
+                            'isResolved': True,
+                            'isOutdated': False,
+                            'path': 'src/a.py',
+                            'line': 4,
+                            'comments': {'nodes': [
+                                {'url': 'https://example.test/thread/done', 'body': 'Done', 'author': {'login': 'reviewer'}},
+                            ]},
+                            'firstComment': {'nodes': [{'url': 'https://example.test/thread/done', 'body': 'Done'}]},
+                            'latestComment': {'nodes': [{'url': 'https://example.test/thread/done', 'body': 'Done'}]},
+                        }]
+                    }
+                }
+            }
+        }
+    }))
+elif args[:2] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif args[:2] == ['api', 'repos/octo/example/pulls/77/reviews?per_page=100&page=1']:
+    print('[]')
+else:
+    raise SystemExit(f'unhandled gh args: {args}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(FINAL_GATE_PY), "--no-auto-clean", self.repo, self.pr])
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("github_threads_missing_reply_count=1", result.stdout)
+        self.assertIn("missing reply evidence", result.stderr)
+
     def test_final_gate_python_fails_when_current_login_has_pending_reviews(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
@@ -2089,8 +2146,12 @@ if args[:2] == ['api', 'graphql']:
                             'isOutdated': False,
                             'path': 'src/a.py',
                             'line': 4,
+                            'comments': {{'nodes': [
+                                {{'url': 'https://example.test/thread/done', 'body': 'Done', 'author': {{'login': 'reviewer'}}}},
+                                {{'url': 'https://example.test/thread/done#reply', 'body': 'Handled', 'author': {{'login': 'agent-login'}}}},
+                            ]}},
                             'firstComment': {{'nodes': [{{'url': 'https://example.test/thread/done', 'body': 'Done'}}]}},
-                            'latestComment': {{'nodes': [{{'url': 'https://example.test/thread/done', 'body': 'Done'}}]}},
+                            'latestComment': {{'nodes': [{{'url': 'https://example.test/thread/done#reply', 'body': 'Handled'}}]}},
                         }}]
                     }}
                 }}
@@ -2160,6 +2221,77 @@ else:
         self.assertEqual(row["id"], "THREAD_LIST")
         self.assertEqual(row["url"], "https://example.test/thread/list-latest")
         self.assertEqual(row["comment_source"], "latest")
+
+    def test_list_threads_python_paginates_comments_for_viewer_reply_evidence(self):
+        gh = self.bin_dir / "gh"
+        gh.write_text(
+            """#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+if args[:2] == ['api', 'user']:
+    print(json.dumps({'login': 'agent-login'}))
+elif args[:2] == ['api', 'graphql']:
+    query = next(arg.split('=', 1)[1] for arg in args if arg.startswith('query='))
+    if 'reviewThreads(first:100' in query:
+        comments = [{'url': 'https://example.test/thread/list-page-1', 'body': 'first', 'author': {'login': 'reviewer'}}]
+        comments.extend(
+            {'url': f'https://example.test/thread/list-page-1#{i}', 'body': f'comment-{i}', 'author': {'login': 'reviewer'}}
+            for i in range(1, 100)
+        )
+        print(json.dumps({
+            'data': {
+                'repository': {
+                    'pullRequest': {
+                        'reviewThreads': {
+                            'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                            'nodes': [{
+                                'id': 'THREAD_LIST_PAGINATED',
+                                'isResolved': True,
+                                'isOutdated': False,
+                                'path': 'src/list.py',
+                                'line': 2,
+                                'comments': {
+                                    'pageInfo': {'hasNextPage': True, 'endCursor': 'CURSOR_1'},
+                                    'nodes': comments,
+                                },
+                                'firstComment': {'nodes': [{'url': 'https://example.test/thread/list-page-1', 'body': 'first'}]},
+                                'latestComment': {'nodes': [{'url': 'https://example.test/thread/list-page-1#99', 'body': 'comment-99'}]},
+                            }]
+                        }
+                    }
+                }
+            }
+        }))
+    elif 'node(id:$threadId)' in query:
+        print(json.dumps({
+            'data': {
+                'node': {
+                    'comments': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': [
+                            {'url': 'https://example.test/thread/list-page-2#100', 'body': 'late reply', 'author': {'login': 'agent-login'}}
+                        ],
+                    }
+                }
+            }
+        }))
+    else:
+        raise SystemExit(f'unhandled graphql query: {query}')
+else:
+    raise SystemExit(f'unhandled gh args: {args}')
+""",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+        result = self.run_cmd([sys.executable, str(LIST_THREADS_PY), self.repo, self.pr])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout.strip())
+        self.assertEqual(row["id"], "THREAD_LIST_PAGINATED")
+        self.assertTrue(row["viewer_replied"])
+        self.assertEqual(row["viewer_reply_url"], "https://example.test/thread/list-page-2#100")
 
     def test_post_reply_python_dry_run_prints_body(self):
         reply_file = Path(self.temp_dir.name) / "reply.md"
@@ -2609,6 +2741,19 @@ else:
             stdin=payload,
             check=True,
         )
+        self.run_cmd(
+            [sys.executable, str(SCRIPT), "update-items-batch", self.repo, self.pr],
+            stdin=json.dumps(
+                [
+                    {
+                        "item_id": "github-thread:THREAD_RESOLVE",
+                        "reply_posted": True,
+                        "reply_url": "https://example.test/thread/resolve#reply",
+                    }
+                ]
+            ),
+            check=True,
+        )
 
         result = self.run_cmd(
             [
@@ -2632,7 +2777,7 @@ else:
         self.assertEqual(item["status"], "CLOSED")
         self.assertTrue(item["handled"])
 
-    def test_resolve_thread_python_succeeds_when_item_not_yet_synced(self):
+    def test_resolve_thread_python_refuses_when_item_not_yet_synced(self):
         gh = self.bin_dir / "gh"
         gh.write_text(
             """#!/usr/bin/env python3
@@ -2668,12 +2813,12 @@ else:
                 "THREAD_ONLY_REMOTE",
             ]
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(result.returncode, 0)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "succeeded")
-        self.assertEqual(payload["session_status"], "missing")
+        self.assertEqual(payload["status"], "failed")
+        self.assertIn("not tracked", payload["error"])
         handled_file = self.github_dir() / "handled_threads.txt"
-        self.assertIn("THREAD_ONLY_REMOTE", handled_file.read_text(encoding="utf-8"))
+        self.assertFalse(handled_file.exists())
 
     def test_resolve_thread_python_requires_explicit_repo_and_pr(self):
         gh = self.bin_dir / "gh"

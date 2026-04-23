@@ -176,10 +176,12 @@ Advanced producer and dispatch details live in:
 2. Use the internal low-level dispatch only when the high-level entrypoints do not fit.
 3. Process only unresolved GitHub threads and open local findings.
 4. For GitHub review threads, reply and resolve are both mandatory.
-5. Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.
-6. For local findings, terminal handling must include a note.
-7. `producer=code-review` must emit findings JSON before session handling starts.
-8. Never declare completion before `python3 scripts/cli.py final-gate` passes.
+5. A GitHub thread is not terminally clean unless reply evidence exists with a concrete reply URL from the current authenticated GitHub login.
+6. Outdated / `STALE` GitHub threads are still unresolved until explicitly handled.
+7. For local findings, terminal handling must include a note.
+8. `producer=code-review` must emit findings JSON before session handling starts.
+9. Never declare completion before `python3 scripts/cli.py final-gate` passes.
+10. Low-level resolve flows must refuse resolve-only handling when reply evidence is absent.
 
 ## Automatic Iteration
 

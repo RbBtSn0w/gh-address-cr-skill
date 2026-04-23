@@ -78,6 +78,74 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertTrue(item["handled"])
         self.assertIsNotNone(item["handled_at"])
 
+    def test_sync_github_restores_reply_evidence_from_viewer_reply(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_REPLY_SYNC",
+                    "isResolved": True,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Please add a null check.",
+                    "url": "https://example.test/thread/reply-sync",
+                    "viewer_replied": True,
+                    "viewer_reply_url": "https://example.test/thread/reply-sync#reply",
+                }
+            ]
+        )
+
+        self.run_engine("sync-github", self.repo, self.pr, stdin=payload, check=True)
+
+        session = self.load_session()
+        item = session["items"]["github-thread:THREAD_REPLY_SYNC"]
+        self.assertEqual(item["status"], "CLOSED")
+        self.assertTrue(item["handled"])
+        self.assertTrue(item["reply_posted"])
+        self.assertEqual(item["reply_url"], "https://example.test/thread/reply-sync#reply")
+
+    def test_sync_github_clears_stale_reply_evidence_when_viewer_has_not_replied(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        with_reply = json.dumps(
+            [
+                {
+                    "id": "THREAD_REPLY_SYNC",
+                    "isResolved": True,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Please add a null check.",
+                    "url": "https://example.test/thread/reply-sync",
+                    "viewer_replied": True,
+                    "viewer_reply_url": "https://example.test/thread/reply-sync#reply",
+                }
+            ]
+        )
+        without_reply = json.dumps(
+            [
+                {
+                    "id": "THREAD_REPLY_SYNC",
+                    "isResolved": True,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Please add a null check.",
+                    "url": "https://example.test/thread/reply-sync",
+                    "viewer_replied": False,
+                    "viewer_reply_url": None,
+                }
+            ]
+        )
+
+        self.run_engine("sync-github", self.repo, self.pr, stdin=with_reply, check=True)
+        self.run_engine("sync-github", self.repo, self.pr, stdin=without_reply, check=True)
+
+        session = self.load_session()
+        item = session["items"]["github-thread:THREAD_REPLY_SYNC"]
+        self.assertFalse(item["reply_posted"])
+        self.assertIsNone(item["reply_url"])
+
     def test_sync_github_reopened_thread_becomes_unhandled_again(self):
         self.run_engine("init", self.repo, self.pr, check=True)
         resolved = json.dumps(
@@ -149,6 +217,32 @@ class SessionEngineCLITest(SessionEngineTestCase):
         gate = self.run_engine("gate", self.repo, self.pr)
         self.assertNotEqual(gate.returncode, 0, gate.stderr)
         self.assertIn("REMOTE GATE FAIL", gate.stdout)
+
+    def test_gate_fails_on_resolved_github_thread_without_reply_evidence(self):
+        self.run_engine("init", self.repo, self.pr, check=True)
+        payload = json.dumps(
+            [
+                {
+                    "id": "THREAD_MISSING_REPLY",
+                    "isResolved": True,
+                    "isOutdated": False,
+                    "path": "src/app.py",
+                    "line": 12,
+                    "body": "Please add a null check.",
+                    "url": "https://example.test/thread/missing-reply",
+                }
+            ]
+        )
+        self.run_engine("sync-github", self.repo, self.pr, stdin=payload, check=True)
+
+        gate = self.run_engine("gate", self.repo, self.pr)
+        self.assertNotEqual(gate.returncode, 0, gate.stderr)
+        self.assertIn("SESSION GATE FAIL", gate.stdout)
+        self.assertIn("github_threads_missing_reply_count=1", gate.stdout)
+
+        summary = (self.workspace_dir() / "audit_summary.md").read_text(encoding="utf-8")
+        self.assertIn("## Invalid GitHub Reply Items", summary)
+        self.assertIn("github-thread:THREAD_MISSING_REPLY", summary)
 
     def test_run_local_review_deduplicates_findings(self):
         self.run_engine("init", self.repo, self.pr, check=True)
@@ -477,7 +571,24 @@ class SessionEngineCLITest(SessionEngineTestCase):
         self.assertEqual(fail.returncode, 1)
         self.assertIn("SESSION GATE FAIL", fail.stdout)
 
-        self.run_engine("update-item", self.repo, self.pr, "github-thread:THREAD_3", "CLOSED", "--note", "Resolved on GitHub.", check=True)
+        self.run_engine(
+            "update-items-batch",
+            self.repo,
+            self.pr,
+            stdin=json.dumps(
+                [
+                    {
+                        "item_id": "github-thread:THREAD_3",
+                        "status": "CLOSED",
+                        "handled": True,
+                        "note": "Resolved on GitHub.",
+                        "reply_posted": True,
+                        "reply_url": "https://example.test/thread/3#reply",
+                    }
+                ]
+            ),
+            check=True,
+        )
         session = self.load_session()
         local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
         self.run_engine("update-item", self.repo, self.pr, local_id, "ACCEPTED", "--note", "Confirmed the issue.", check=True)
@@ -500,6 +611,8 @@ class SessionEngineCLITest(SessionEngineTestCase):
                     "line": 1,
                     "body": "Fix me first.",
                     "url": "https://example.test/thread/3a",
+                    "viewer_replied": True,
+                    "viewer_reply_url": "https://example.test/thread/3a#reply",
                 },
                 {
                     "id": "THREAD_3B",
@@ -509,6 +622,8 @@ class SessionEngineCLITest(SessionEngineTestCase):
                     "line": 2,
                     "body": "Fix me second.",
                     "url": "https://example.test/thread/3b",
+                    "viewer_replied": True,
+                    "viewer_reply_url": "https://example.test/thread/3b#reply",
                 },
             ]
         )
@@ -586,8 +701,32 @@ class SessionEngineCLITest(SessionEngineTestCase):
             ]
         )
         self.run_engine("sync-github", self.repo, self.pr, "--scan-id", "current-run", stdin=gh_current_payload, check=True)
-        self.run_engine("update-item", self.repo, self.pr, "github-thread:THREAD_EXISTING", "CLOSED", "--note", "Resolved on GitHub.", check=True)
-        self.run_engine("update-item", self.repo, self.pr, "github-thread:THREAD_NEW", "CLOSED", "--note", "Resolved on GitHub.", check=True)
+        self.run_engine(
+            "update-items-batch",
+            self.repo,
+            self.pr,
+            stdin=json.dumps(
+                [
+                    {
+                        "item_id": "github-thread:THREAD_EXISTING",
+                        "status": "CLOSED",
+                        "handled": True,
+                        "note": "Resolved on GitHub.",
+                        "reply_posted": True,
+                        "reply_url": "https://example.test/thread/existing#reply",
+                    },
+                    {
+                        "item_id": "github-thread:THREAD_NEW",
+                        "status": "CLOSED",
+                        "handled": True,
+                        "note": "Resolved on GitHub.",
+                        "reply_posted": True,
+                        "reply_url": "https://example.test/thread/new#reply",
+                    },
+                ]
+            ),
+            check=True,
+        )
 
         session = self.load_session()
         local_id = next(item_id for item_id, item in session["items"].items() if item["item_kind"] == "local_finding")
