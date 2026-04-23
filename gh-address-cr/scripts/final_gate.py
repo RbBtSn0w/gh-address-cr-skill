@@ -63,6 +63,7 @@ def main() -> int:
 
     unresolved_count = metric_count(data, "unresolved_github_threads_count")
     blocking_count = metric_count(data, "blocking_items_count")
+    missing_reply_count = metric_count(data, "github_threads_missing_reply_count")
     summary_from_engine = data.get("audit_summary")
     summary_hash = data.get("audit_summary_sha256")
     login = github_viewer_login()
@@ -79,6 +80,8 @@ def main() -> int:
             failure_reasons.append(f"{unresolved_count} unresolved thread(s)")
         if blocking_count:
             failure_reasons.append(f"{blocking_count} blocking item(s)")
+        if missing_reply_count:
+            failure_reasons.append(f"{missing_reply_count} GitHub thread(s) missing reply evidence")
         if pending_review_count:
             failure_reasons.append(f"{pending_review_count} pending review(s)")
         if not failure_reasons:
@@ -114,6 +117,7 @@ def main() -> int:
                 {
                     "unresolved_count": unresolved_count,
                     "blocking_count": blocking_count,
+                    "missing_reply_count": missing_reply_count,
                     "pending_review_count": pending_review_count,
                     "pending_review_ids": pending_review_ids,
                     "summary_file": str(summary),

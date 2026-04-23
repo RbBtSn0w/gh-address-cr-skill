@@ -5,7 +5,14 @@ import json
 import sys
 
 from post_reply import submit_pending_reviews_result
-from python_common import audit_event, gh_write_cmd, github_viewer_login, is_transient_gh_failure, list_pending_review_ids
+from python_common import (
+    audit_event,
+    gh_write_cmd,
+    github_thread_reply_evidence,
+    github_viewer_login,
+    is_transient_gh_failure,
+    list_pending_review_ids,
+)
 
 def chunk_actions(actions: list[dict], max_size: int) -> list[list[dict]]:
     return [actions[i:i + max_size] for i in range(0, len(actions), max_size)]
@@ -69,6 +76,20 @@ def main() -> int:
                     error="GitHub thread actions require thread_id.",
                 )
                 continue
+            if action.get("resolve") and not action.get("reply_body"):
+                has_reply_evidence, error = github_thread_reply_evidence(
+                    args.repo,
+                    args.pr_number,
+                    thread_id,
+                    require_tracked=True,
+                )
+                if not has_reply_evidence:
+                    had_error = True
+                    results[action["item_id"]] = item_result(
+                        status="failed",
+                        error=error,
+                    )
+                    continue
             i = len(executable_actions)
             if action.get("reply_body"):
                 query_parts.append(f"reply{i}: addPullRequestReviewThreadReply(input:{{pullRequestReviewThreadId: $reply{i}_threadId, body: $reply{i}_body}}) {{ comment {{ url }} }}")

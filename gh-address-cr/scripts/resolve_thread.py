@@ -6,7 +6,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-from python_common import audit_event, handled_threads_file, gh_write_cmd, is_transient_gh_failure, run_cmd, session_engine
+from python_common import (
+    audit_event,
+    github_thread_reply_evidence,
+    handled_threads_file,
+    gh_write_cmd,
+    is_transient_gh_failure,
+    run_cmd,
+    session_engine,
+)
 
 
 def append_handled(thread_id: str, repo: str, pr_number: str):
@@ -65,6 +73,26 @@ def main() -> int:
         "error": None,
     }
     try:
+        has_reply_evidence, reply_error = github_thread_reply_evidence(
+            args.repo,
+            args.pr_number,
+            args.thread_id,
+            require_tracked=True,
+        )
+        if not has_reply_evidence:
+            payload["status"] = "failed"
+            payload["error"] = reply_error
+            audit_event(
+                "resolve_thread",
+                "failed",
+                args.repo,
+                args.pr_number,
+                args.audit_id,
+                "Refused to resolve thread without reply evidence",
+                {"thread_id": args.thread_id, "error": payload["error"]},
+            )
+            return emit_result(payload, 1, error_message=payload["error"])
+
         result = gh_write_cmd(
             ["gh", "api", "graphql", "-f", f"query={query}", "-F", f"threadId={args.thread_id}"],
             check=False,

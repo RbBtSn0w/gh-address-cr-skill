@@ -12,7 +12,14 @@ from pathlib import Path
 
 from ingest_findings import normalize_finding
 
-from python_common import audit_event as write_audit_event, audit_log_file, audit_summary_file, session_file, state_dir
+from python_common import (
+    audit_event as write_audit_event,
+    audit_log_file,
+    audit_summary_file,
+    item_has_reply_evidence,
+    session_file,
+    state_dir,
+)
 
 
 SCHEMA_VERSION = 1
@@ -248,6 +255,9 @@ def gate_progress_counts(session: dict, blocking: list[dict], unresolved_threads
     items = list(session["items"].values())
     github_items = [item for item in items if item["item_kind"] == "github_thread"]
     local_items = [item for item in items if item["item_kind"] == "local_finding"]
+    missing_reply_items = [
+        item for item in github_items if item["status"] in GITHUB_TERMINAL_STATUSES and not item_has_reply_evidence(item)
+    ]
     run_id = current_run_id(session)
     return {
         "tracked_items_count": len(items),
@@ -259,6 +269,7 @@ def gate_progress_counts(session: dict, blocking: list[dict], unresolved_threads
             1 for item in github_items if run_id and item.get("handled") and item.get("handled_run_id") == run_id
         ),
         "github_threads_unresolved_count": len(unresolved_threads),
+        "github_threads_missing_reply_count": len(missing_reply_items),
         "local_findings_total_count": len(local_items),
         "local_findings_handled_count": sum(1 for item in local_items if item.get("handled")),
         "local_findings_new_count": sum(1 for item in local_items if run_id and item.get("created_run_id") == run_id),
@@ -336,6 +347,19 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
     else:
         status = "OPEN"
     reopened = bool(existing) and existing_status in GITHUB_TERMINAL_STATUSES and status == "OPEN"
+    viewer_reply_checked = row.get("viewer_reply_checked")
+    viewer_reply_known = bool(viewer_reply_checked) if isinstance(viewer_reply_checked, bool) else any(
+        key in row for key in ("viewer_replied", "viewer_reply_url")
+    )
+    if reopened:
+        reply_posted = False
+        reply_url = None
+    elif viewer_reply_known:
+        reply_posted = bool(row.get("viewer_replied"))
+        reply_url = row.get("viewer_reply_url") if reply_posted else None
+    else:
+        reply_posted = existing.get("reply_posted", False) if existing else False
+        reply_url = existing.get("reply_url") if existing else None
     payload = {
         "item_id": item_id,
         "item_kind": "github_thread",
@@ -377,8 +401,8 @@ def upsert_github_thread(session: dict, row: dict) -> tuple[str, bool]:
         "last_auto_action": existing.get("last_auto_action") if existing else None,
         "last_auto_failure": existing.get("last_auto_failure") if existing else None,
         "needs_human": False if reopened else (existing.get("needs_human", False) if existing else False),
-        "reply_posted": False if reopened else (existing.get("reply_posted", False) if existing else False),
-        "reply_url": None if reopened else (existing.get("reply_url") if existing else None),
+        "reply_posted": reply_posted,
+        "reply_url": reply_url,
         "created_at": existing.get("created_at") if existing else now,
         "created_run_id": existing.get("created_run_id") if existing else run_id,
         "updated_at": now,
@@ -996,6 +1020,13 @@ def cmd_gate(args):
         and item["status"] in {"CLARIFIED", "DEFERRED", "FIXED", "VERIFIED", "CLOSED", "PUBLISHED"}
         and not (item.get("resolution_note") or "").strip()
     ]
+    invalid_github_reply_items = [
+        item
+        for item in session["items"].values()
+        if item["item_kind"] == "github_thread"
+        and item["status"] in GITHUB_TERMINAL_STATUSES
+        and not item_has_reply_evidence(item)
+    ]
     loop_warning_items = [
         item
         for item in session["items"].values()
@@ -1008,7 +1039,7 @@ def cmd_gate(args):
         for item in session["items"].values()
         if item["item_kind"] == "github_thread" and item["status"] not in GITHUB_TERMINAL_STATUSES
     ]
-    session_gate = "PASS" if not blocking and not invalid_local_items and not loop_warning_items else "FAIL"
+    session_gate = "PASS" if not blocking and not invalid_local_items and not invalid_github_reply_items and not loop_warning_items else "FAIL"
     remote_gate = "PASS" if not unresolved_threads else "FAIL"
     progress = gate_progress_counts(session, blocking, unresolved_threads)
     summary = summary_path(args.repo, args.pr_number)
@@ -1022,6 +1053,7 @@ def cmd_gate(args):
         f"- blocking_items_count: {len(blocking)}",
         f"- unresolved_github_threads_count: {len(unresolved_threads)}",
         f"- invalid_local_items_count: {len(invalid_local_items)}",
+        f"- github_threads_missing_reply_count: {len(invalid_github_reply_items)}",
         f"- loop_warning_items_count: {len(loop_warning_items)}",
     ]
     if blocking:
@@ -1035,6 +1067,12 @@ def cmd_gate(args):
         lines.extend(
             f"- {item['item_id']} status={item['status']} missing=resolution_note"
             for item in invalid_local_items
+        )
+    if invalid_github_reply_items:
+        lines.extend(["", "## Invalid GitHub Reply Items"])
+        lines.extend(
+            f"- {item['item_id']} status={item['status']} path={item.get('path') or '-'} line={item.get('line') or '-'} missing=reply_evidence"
+            for item in invalid_github_reply_items
         )
     if loop_warning_items:
         lines.extend(["", "## Loop Warning Items"])
@@ -1055,6 +1093,7 @@ def cmd_gate(args):
             "remote_gate": remote_gate,
             "blocking_items_count": len(blocking),
             "invalid_local_items_count": len(invalid_local_items),
+            "github_threads_missing_reply_count": len(invalid_github_reply_items),
             "loop_warning_items_count": len(loop_warning_items),
             **progress,
             "summary_file": str(summary),
@@ -1067,6 +1106,7 @@ def cmd_gate(args):
     print(f"blocking_items_count={len(blocking)}")
     print(f"unresolved_github_threads_count={len(unresolved_threads)}")
     print(f"invalid_local_items_count={len(invalid_local_items)}")
+    print(f"github_threads_missing_reply_count={len(invalid_github_reply_items)}")
     print(f"loop_warning_items_count={len(loop_warning_items)}")
     print(f"tracked_items_count={progress['tracked_items_count']}")
     print(f"handled_items_count={progress['handled_items_count']}")

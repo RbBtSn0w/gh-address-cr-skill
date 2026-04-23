@@ -185,6 +185,63 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         self.assertIn("thread_id", payload["github-thread:MISSING_THREAD_ID"]["error"])
         self.assertTrue(audit_calls)
 
+    def test_batch_github_execute_rejects_resolve_only_without_reply_evidence(self):
+        module = self.load_module()
+        workspace = self.workspace_dir()
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "session.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "repo": self.repo,
+                    "pr_number": self.pr,
+                    "items": {
+                        "github-thread:THREAD_REPLY_REQUIRED": {
+                            "item_id": "github-thread:THREAD_REPLY_REQUIRED",
+                            "item_kind": "github_thread",
+                            "origin_ref": "THREAD_REPLY_REQUIRED",
+                            "status": "OPEN",
+                            "reply_posted": False,
+                            "reply_url": None,
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        action_payload = json.dumps(
+            [
+                {
+                    "item_id": "github-thread:THREAD_REPLY_REQUIRED",
+                    "thread_id": "THREAD_REPLY_REQUIRED",
+                    "resolve": True,
+                }
+            ]
+        )
+
+        module.list_pending_review_ids = lambda *_args, **_kwargs: set()
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {"status": "skipped", "submitted": [], "error": None}
+        module.github_viewer_login = lambda: "tester"
+        module.audit_event = lambda *args, **kwargs: None
+        module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("gh_write_cmd should not be called"))
+
+        with patched_argv(
+            [
+                "batch_github_execute.py",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+            ]
+        ), patched_stdin(action_payload):
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                rc = module.main()
+                payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(payload["github-thread:THREAD_REPLY_REQUIRED"]["status"], "failed")
+        self.assertIn("reply evidence", payload["github-thread:THREAD_REPLY_REQUIRED"]["error"])
+
     def test_batch_github_execute_marks_successful_actions_unknown_when_submit_is_partial(self):
         module = self.load_module()
         action_payload = json.dumps(

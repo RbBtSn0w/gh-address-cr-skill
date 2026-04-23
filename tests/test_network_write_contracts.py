@@ -30,7 +30,23 @@ class NetworkWriteContractTest(PythonScriptTestCase):
             sys.path.pop(0)
         return module
 
+    def seed_github_thread(self, thread_id: str, *, reply_posted: bool = True):
+        init = self.run_cmd([sys.executable, str(SCRIPTS_DIR / "session_engine.py"), "init", self.repo, self.pr], check=True)
+        self.assertEqual(init.returncode, 0, init.stderr)
+        session_path = self.state_dir / "octo__example" / f"pr-{self.pr}" / "session.json"
+        session = json.loads(session_path.read_text(encoding="utf-8"))
+        session["items"][f"github-thread:{thread_id}"] = {
+            "item_id": f"github-thread:{thread_id}",
+            "item_kind": "github_thread",
+            "origin_ref": thread_id,
+            "status": "OPEN",
+            "reply_posted": reply_posted,
+            "reply_url": f"https://example.test/thread/{thread_id}#reply" if reply_posted else None,
+        }
+        session_path.write_text(json.dumps(session), encoding="utf-8")
+
     def test_resolve_thread_reports_unknown_when_session_update_fails_after_remote_success(self):
+        self.seed_github_thread("THREAD_RESOLVE")
         module = self.load_module("resolve_thread.py", "resolve_thread_under_test")
 
         module.gh_write_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(
@@ -79,6 +95,54 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertTrue(payload["resolved"])
         self.assertIn("session update failed", payload["error"])
         self.assertIn("session update failed", stderr.getvalue())
+
+    def test_resolve_thread_refuses_remote_resolve_without_reply_evidence(self):
+        self.seed_github_thread("THREAD_REPLY_REQUIRED", reply_posted=False)
+
+        module = self.load_module("resolve_thread.py", "resolve_thread_reply_guard_under_test")
+        module.audit_event = lambda *args, **kwargs: None
+        module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("gh_write_cmd should not be called"))
+
+        with patched_argv(
+            [
+                "resolve_thread.py",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+                "THREAD_REPLY_REQUIRED",
+            ]
+        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+            rc = module.main()
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(payload["status"], "failed")
+        self.assertIn("reply evidence", payload["error"])
+        self.assertIn("reply evidence", stderr.getvalue())
+
+    def test_resolve_thread_refuses_when_thread_is_not_tracked(self):
+        module = self.load_module("resolve_thread.py", "resolve_thread_missing_item_under_test")
+        module.audit_event = lambda *args, **kwargs: None
+        module.gh_write_cmd = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("gh_write_cmd should not be called"))
+
+        with patched_argv(
+            [
+                "resolve_thread.py",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+                "THREAD_NOT_TRACKED",
+            ]
+        ), patch("sys.stdout", new=io.StringIO()) as stdout, patch("sys.stderr", new=io.StringIO()) as stderr:
+            rc = module.main()
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(payload["status"], "failed")
+        self.assertIn("not tracked", payload["error"])
+        self.assertIn("not tracked", stderr.getvalue())
 
     def test_publish_finding_reports_unknown_when_mark_published_fails_after_comment_creation(self):
         module = self.load_module("publish_finding.py", "publish_finding_under_test")
@@ -162,6 +226,7 @@ class NetworkWriteContractTest(PythonScriptTestCase):
         self.assertIn("reply response was not valid JSON", stderr.getvalue())
 
     def test_resolve_thread_audits_invalid_json_response(self):
+        self.seed_github_thread("THREAD_RESOLVE")
         module = self.load_module("resolve_thread.py", "resolve_thread_under_test")
 
         audits = []
