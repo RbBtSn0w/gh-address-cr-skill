@@ -933,7 +933,7 @@ def _load_thread_comments(thread_id: str, initial_connection: dict | None) -> li
     ... on PullRequestReviewThread{
       comments(first:100, after:$after){
         pageInfo{ hasNextPage endCursor }
-        nodes{ url body author{ login } }
+        nodes{ url author{ login } }
       }
     }
   }
@@ -956,6 +956,7 @@ def _viewer_reply_evidence(comments: list[dict], viewer_login: str) -> tuple[boo
     if not viewer_login:
         return False, None
     viewer_reply_url = None
+    # The first thread comment is the original review comment, not reply evidence.
     for comment in comments[1:]:
         if not isinstance(comment, dict):
             continue
@@ -987,7 +988,7 @@ def list_threads(repo: str, pr_number: str) -> list[dict]:
           line
           comments(first:100){
             pageInfo{ hasNextPage endCursor }
-            nodes{ url body author{ login } }
+            nodes{ url author{ login } }
           }
           firstComment: comments(first:1){ nodes{ url body } }
           latestComment: comments(last:1){ nodes{ url body } }

@@ -242,6 +242,119 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         self.assertEqual(payload["github-thread:THREAD_REPLY_REQUIRED"]["status"], "failed")
         self.assertIn("reply evidence", payload["github-thread:THREAD_REPLY_REQUIRED"]["error"])
 
+    def test_batch_github_execute_runs_reply_before_resolve_for_combined_actions(self):
+        module = self.load_module()
+        action_payload = json.dumps(
+            [
+                {
+                    "item_id": "github-thread:THREAD_PHASED",
+                    "thread_id": "THREAD_PHASED",
+                    "reply_body": "Reply body",
+                    "resolve": True,
+                }
+            ]
+        )
+        calls = []
+
+        def fake_write_cmd(cmd, *, input_text=None, check=False):
+            query = next(part.split("=", 1)[1] for part in cmd if part.startswith("query="))
+            calls.append(query)
+            if len(calls) == 1:
+                self.assertIn("addPullRequestReviewThreadReply", query)
+                self.assertNotIn("resolveReviewThread", query)
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps({"data": {"reply0": {"comment": {"url": "https://example.test/reply"}}}}),
+                    "",
+                )
+            if len(calls) == 2:
+                self.assertIn("resolveReviewThread", query)
+                self.assertNotIn("addPullRequestReviewThreadReply", query)
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps({"data": {"resolve0": {"thread": {"id": "THREAD_PHASED", "isResolved": True}}}}),
+                    "",
+                )
+            raise AssertionError(f"unexpected extra GraphQL call: {cmd}")
+
+        module.list_pending_review_ids = lambda *_args, **_kwargs: set()
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {"status": "skipped", "submitted": [], "error": None}
+        module.github_viewer_login = lambda: "tester"
+        module.audit_event = lambda *args, **kwargs: None
+        module.gh_write_cmd = fake_write_cmd
+
+        with patched_argv(
+            [
+                "batch_github_execute.py",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+            ]
+        ), patched_stdin(action_payload):
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                rc = module.main()
+                payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(payload["github-thread:THREAD_PHASED"]["status"], "succeeded")
+        self.assertEqual(payload["github-thread:THREAD_PHASED"]["reply_url"], "https://example.test/reply")
+        self.assertTrue(payload["github-thread:THREAD_PHASED"]["resolved"])
+
+    def test_batch_github_execute_does_not_resolve_when_reply_phase_fails(self):
+        module = self.load_module()
+        action_payload = json.dumps(
+            [
+                {
+                    "item_id": "github-thread:THREAD_REPLY_FAILS",
+                    "thread_id": "THREAD_REPLY_FAILS",
+                    "reply_body": "Reply body",
+                    "resolve": True,
+                }
+            ]
+        )
+        calls = []
+
+        def fake_write_cmd(cmd, *, input_text=None, check=False):
+            query = next(part.split("=", 1)[1] for part in cmd if part.startswith("query="))
+            calls.append(query)
+            self.assertIn("addPullRequestReviewThreadReply", query)
+            self.assertNotIn("resolveReviewThread", query)
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                json.dumps({"data": {}, "errors": [{"message": "reply failed", "path": ["reply0"]}]}),
+                "reply failed",
+            )
+
+        module.list_pending_review_ids = lambda *_args, **_kwargs: set()
+        module.submit_pending_reviews_result = lambda *_args, **_kwargs: {"status": "skipped", "submitted": [], "error": None}
+        module.github_viewer_login = lambda: "tester"
+        module.audit_event = lambda *args, **kwargs: None
+        module.gh_write_cmd = fake_write_cmd
+
+        with patched_argv(
+            [
+                "batch_github_execute.py",
+                "--repo",
+                self.repo,
+                "--pr",
+                self.pr,
+            ]
+        ), patched_stdin(action_payload):
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                rc = module.main()
+                payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(payload["github-thread:THREAD_REPLY_FAILS"]["status"], "failed")
+        self.assertEqual(payload["github-thread:THREAD_REPLY_FAILS"]["error"], "reply failed")
+        self.assertIsNone(payload["github-thread:THREAD_REPLY_FAILS"]["resolved"])
+
     def test_batch_github_execute_marks_successful_actions_unknown_when_submit_is_partial(self):
         module = self.load_module()
         action_payload = json.dumps(
@@ -418,26 +531,33 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
         }
         module.github_viewer_login = lambda: "tester"
         module.audit_event = lambda *args, **kwargs: None
+        queries = []
 
         def fake_write_cmd(cmd, *, input_text=None, check=False):
             query_arg = next(part for part in cmd if part.startswith("query="))
-            self.assertIn("reply0", query_arg)
-            self.assertIn("resolve0", query_arg)
+            queries.append(query_arg)
+            self.assertIn("0", query_arg)
             self.assertNotIn("reply1", query_arg)
             self.assertNotIn("resolve1", query_arg)
-            return subprocess.CompletedProcess(
-                cmd,
-                0,
-                json.dumps(
-                    {
-                        "data": {
-                            "reply0": {"comment": {"url": "https://example.test/reply"}},
-                            "resolve0": {"thread": {"id": "THREAD_5", "isResolved": True}},
-                        }
-                    }
-                ),
-                "",
-            )
+            if len(queries) == 1:
+                self.assertIn("reply0", query_arg)
+                self.assertNotIn("resolve0", query_arg)
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps({"data": {"reply0": {"comment": {"url": "https://example.test/reply"}}}}),
+                    "",
+                )
+            if len(queries) == 2:
+                self.assertIn("resolve0", query_arg)
+                self.assertNotIn("reply0", query_arg)
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps({"data": {"resolve0": {"thread": {"id": "THREAD_5", "isResolved": True}}}}),
+                    "",
+                )
+            raise AssertionError(f"unexpected extra GraphQL call: {cmd}")
 
         module.gh_write_cmd = fake_write_cmd
 
@@ -455,5 +575,6 @@ class BatchGitHubExecuteTestCase(PythonScriptTestCase):
                 payload = json.loads(stdout.getvalue())
 
         self.assertNotEqual(rc, 0)
+        self.assertEqual(len(queries), 2)
         self.assertEqual(payload["github-thread:MISSING_THREAD_ID"]["status"], "failed")
         self.assertEqual(payload["github-thread:THREAD_5"]["status"], "succeeded")
