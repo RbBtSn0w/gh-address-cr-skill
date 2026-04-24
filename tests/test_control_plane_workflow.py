@@ -87,7 +87,7 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             ]
         )
 
-        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1")
+        result = self.run_runtime_module("agent", "next", self.repo, self.pr, "--role", "fixer", "--agent-id", "codex-1", "--now", NOW.isoformat())
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
@@ -296,10 +296,12 @@ class ControlPlaneWorkflowCLITest(PythonScriptTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_runtime_module("agent", "submit", self.repo, self.pr, "--input", str(response_path))
+        result = self.run_runtime_module(
+            "agent", "submit", self.repo, self.pr, "--input", str(response_path), "--now", NOW.isoformat()
+        )
 
-        self.assertEqual(result.returncode, 5)
         payload = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 5)
         self.assertEqual(payload["status"], "VERIFICATION_REJECTED")
         session = self.load_session()
         self.assertEqual(session["items"]["local-finding:1"]["state"], "open")

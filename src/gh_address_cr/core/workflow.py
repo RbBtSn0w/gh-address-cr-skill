@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -186,7 +187,10 @@ def issue_action_request(
     }
 
 
-def submit_action_response(repo: str, pr_number: str, *, response_path: str | Path) -> dict[str, Any]:
+def submit_action_response(
+    repo: str, pr_number: str, *, response_path: str | Path, now: datetime | None = None
+) -> dict[str, Any]:
+    now = _coerce_now(now)
     session = session_store.load_session(repo, pr_number)
     ledger = _ledger(session)
     path = Path(response_path)
@@ -278,6 +282,7 @@ def submit_action_response(repo: str, pr_number: str, *, response_path: str | Pa
             role=str(lease["role"]),
             item_id=item_id,
             request_hash=str(expected_request_hash),
+            now=now,
         )
         accept_lease(session, lease_id)
     except LeaseSubmissionError as exc:

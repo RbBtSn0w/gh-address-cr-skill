@@ -661,6 +661,7 @@ def build_agent_manifest() -> dict:
 
 def handle_agent_command(args: argparse.Namespace) -> int:
     if args.repo in {None, "-h", "--help"}:
+
         sys.stdout.write(
             "usage: gh-address-cr agent {manifest,next,submit,leases,reclaim} ...\n\n"
             "Agent protocol utilities.\n"
@@ -687,13 +688,18 @@ def handle_agent_next(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("pr_number")
     parser.add_argument("--role", required=True)
     parser.add_argument("--agent-id", default="agent")
+    parser.add_argument("--now")
     parsed = parser.parse_args(_prepend_optional(repo, passthrough))
     try:
+        now_dt = None
+        if parsed.now:
+            now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
         payload = workflow.issue_action_request(
             parsed.repo,
             parsed.pr_number,
             role=parsed.role,
             agent_id=parsed.agent_id,
+            now=now_dt,
         )
     except workflow.WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
@@ -706,9 +712,15 @@ def handle_agent_submit(repo: str | None, passthrough: list[str]) -> int:
     parser.add_argument("repo")
     parser.add_argument("pr_number")
     parser.add_argument("--input", required=True)
+    parser.add_argument("--now")
     parsed = parser.parse_args(_prepend_optional(repo, passthrough))
     try:
-        payload = workflow.submit_action_response(parsed.repo, parsed.pr_number, response_path=parsed.input)
+        now_dt = None
+        if parsed.now:
+            now_dt = datetime.fromisoformat(parsed.now.replace("Z", "+00:00"))
+        payload = workflow.submit_action_response(
+            parsed.repo, parsed.pr_number, response_path=parsed.input, now=now_dt
+        )
     except workflow.WorkflowError as exc:
         return output_workflow_error(exc, repo=parsed.repo, pr_number=parsed.pr_number)
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -744,6 +756,53 @@ def handle_agent_reclaim(repo: str | None, passthrough: list[str]) -> int:
     except Exception as exc:
         return output_generic_agent_error(parsed.repo, parsed.pr_number, "SESSION_ERROR", str(exc))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return 0
+
+
+def handle_superpowers_command(args: argparse.Namespace) -> int:
+    if args.repo != "check":
+        print(f"Unknown superpowers subcommand: {args.repo}. Did you mean 'check'?", file=sys.stderr)
+        return 2
+
+    # Simple scanner for superpowers bridge verification
+    required_skills = [
+        "verification-before-completion",
+        "test-driven-development",
+        "systematic-debugging",
+        "receiving-code-review",
+        "finishing-a-development-branch",
+    ]
+    optional_skills = [
+        "fail-fast-loud",
+        "dispatching-parallel-agents",
+        "code-review",
+    ]
+
+    global_root = Path.home() / ".agents" / "skills"
+
+    lines = [
+        "# Superpowers Bridge Report",
+        "",
+        "This report verifies the presence of required and optional skills for the gh-address-cr-skill control plane.",
+        "",
+        "## Required Skills",
+        "",
+    ]
+
+    for skill in required_skills:
+        global_path = global_root / skill
+        status = "✅ Found" if global_path.is_dir() else "❌ Missing"
+        lines.append(f"- **{skill}**: {status} (at {global_path})")
+
+    lines.extend(["", "## Optional Skills", ""])
+    for skill in optional_skills:
+        global_path = global_root / skill
+        status = "✅ Found" if global_path.is_dir() else "⚪ Missing"
+        lines.append(f"- **{skill}**: {status} (at {global_path})")
+
+    content = "\n".join(lines) + "\n"
+    Path("superpowers-bridge-report.md").write_text(content, encoding="utf-8")
+    sys.stdout.write(content)
     return 0
 
 
@@ -833,6 +892,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "agent":
         return handle_agent_command(args)
+
+    if args.command == "superpowers":
+        return handle_superpowers_command(args)
 
     if args.command == "adapter" and args.repo == "check-runtime" and args.pr_number is None and not args.args:
         sys.stdout.write(json.dumps(workflow.runtime_compatibility(), indent=2, sort_keys=True) + "\n")
