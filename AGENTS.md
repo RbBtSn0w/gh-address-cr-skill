@@ -1,8 +1,13 @@
 # AGENTS.md
 
-This file is the repository-level constitution for agents working in the source repo.
-It is not itself part of the packaged skill payload.
-Read it first to understand the repo layout, release boundary, and completion standard.
+This file is the repository-level runtime guidance for agents working in the
+source repo. It is not itself part of the packaged skill payload.
+Read it first to understand the repo layout, release boundary, and completion
+standard.
+
+For project-specific architecture and product-contract governance, also read
+`.specify/memory/constitution.md`. That constitution owns durable architecture
+principles; this file owns day-to-day agent execution rules in this source repo.
 
 ## Scope And Authority
 
@@ -10,8 +15,9 @@ Follow this order of precedence:
 
 1. Direct system, developer, and user instructions
 2. This `AGENTS.md`
-3. Executable repository contracts in `tests/`
-4. Public product and skill contracts in `README.md`
+3. `.specify/memory/constitution.md` for architecture and product-contract governance
+4. Executable repository contracts in `tests/`
+5. Public product and skill contracts in `README.md`
 
 If a lower-level doc conflicts with a higher-level instruction, follow the higher-level instruction and do not silently blend them.
 
@@ -153,3 +159,9 @@ You may say a task is complete only when all of the following are true:
 - no unresolved high-severity issue introduced by your change is being ignored
 
 When in doubt, be precise, be explicit, and fail loudly rather than leaving the repository in an ambiguous state.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read
+`specs/001-agent-control-plane/plan.md`.
+<!-- SPECKIT END -->
