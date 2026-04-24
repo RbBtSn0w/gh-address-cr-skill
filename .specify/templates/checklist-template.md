@@ -15,6 +15,7 @@
   - Feature requirements from spec.md
   - Technical context from plan.md
   - Implementation details from tasks.md
+  - Constitution gates from .specify/memory/constitution.md
   
   DO NOT keep these sample items in the generated checklist file.
   ============================================================================
@@ -38,3 +39,5 @@
 - Add comments or findings inline
 - Link to relevant resources or documentation
 - Items are numbered sequentially for easy reference
+- For implementation/release checklists, include constitution compliance,
+  evidence, final-gate, and repo-root vs skill-root path checks where relevant

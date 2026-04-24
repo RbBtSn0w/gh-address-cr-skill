@@ -95,6 +95,14 @@
 - **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
 - **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
 
+### Constitution Alignment *(mandatory)*
+
+- **Control Plane Impact**: [Does this feature affect session state, GitHub IO, findings intake, loop safety, audit artifacts, telemetry, or final-gate behavior? If yes, describe the deterministic owner.]
+- **CLI / Agent Contract Impact**: [Does this feature change `review`, high-level commands, machine summary fields, reason codes, wait states, exit codes, or structured action requests/responses?]
+- **Evidence Requirements**: [What evidence proves each review item was verified, classified, replied to, resolved, and gated?]
+- **Packaged Skill Boundary**: [Which changes belong under `gh-address-cr/`, and which are repo-root development/test/release support only?]
+- **Fail-Fast Behavior**: [Which malformed inputs, missing tools, unsafe states, or unsupported usages must fail loudly?]
+
 ### Key Entities *(include if feature involves data)*
 
 - **[Entity 1]**: [What it represents, key attributes without implementation]

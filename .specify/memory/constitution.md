@@ -1,50 +1,169 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+Version change: template -> 1.0.0
+Modified principles:
+- Placeholder Principle 1 -> I. Control Plane Owns Runtime State
+- Placeholder Principle 2 -> II. CLI Is The Stable Public Interface
+- Placeholder Principle 3 -> III. Evidence-First Review Handling
+- Placeholder Principle 4 -> IV. Packaged Skill Boundary Is Explicit
+- Placeholder Principle 5 -> V. Testable Contracts And Fail-Fast Changes
+Added sections:
+- Runtime Architecture
+- Development Workflow And Quality Gates
+Removed sections:
+- None
+Templates requiring updates:
+- .specify/templates/plan-template.md: updated
+- .specify/templates/spec-template.md: updated
+- .specify/templates/tasks-template.md: updated
+- .specify/templates/checklist-template.md: updated
+- .specify/templates/commands/*.md: not present
+Runtime guidance requiring updates:
+- AGENTS.md: updated
+- README.md: updated
+- gh-address-cr/agents/openai.yaml: reviewed, no update required
+Follow-up TODOs:
+- None
+-->
+# GH Address CR Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Control Plane Owns Runtime State
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+`gh-address-cr` is a PR-scoped control plane for AI coding agents. Runtime
+state, intake routing, GitHub side effects, reply evidence, session metrics,
+loop safety, and final gating MUST be owned by deterministic code. Markdown
+files and agent hints MAY describe how to use the system, but they MUST NOT be
+the authoritative implementation of state transitions or completion checks.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+Rationale: PR review handling has external side effects and resumable state.
+The workflow must be auditable after interruptions and reproducible without
+depending on an agent's conversational memory.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### II. CLI Is The Stable Public Interface
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+High-level CLI commands are the only agent-safe public surface. The main public
+entrypoint is `review`; advanced entrypoints such as `threads`, `findings`,
+`adapter`, and `review-to-findings` MAY exist for explicit integrations but
+MUST NOT replace `review` as the default orchestration path. Machine-readable
+outputs, reason codes, wait states, exit codes, cache artifacts, and stable
+input contracts MUST be preserved or versioned when changed.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+Rationale: AI agents, humans, CI, and future agent runners need the same stable
+control boundary. Low-level script topology is an implementation detail and
+MUST NOT leak into normal agent instructions.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### III. Evidence-First Review Handling
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Every review item MUST be verified before code changes are made. Each item MUST
+be classified as `fix`, `clarify`, `defer`, or `reject`; out-of-scope work MUST
+be deferred with rationale instead of silently stretching the current PR. GitHub
+review threads require both reply and resolve. Terminal GitHub threads require
+durable reply evidence from the current authenticated GitHub login, including a
+concrete reply URL. Local findings require an explicit terminal handling note.
+Completion MUST NOT be claimed until `final-gate` passes for the current PR
+session.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+Rationale: A zero unresolved-thread count is not enough. The control plane must
+prove that the agent responded, resolved, and left recoverable evidence.
+
+### IV. Packaged Skill Boundary Is Explicit
+
+This repository has two scopes: the source repository and the packaged skill
+payload under `gh-address-cr/`. Rules that must survive skill installation MUST
+live under the packaged skill root, primarily in `gh-address-cr/SKILL.md` or
+skill-owned references. Repository-level tests, CI, release metadata, and
+development guidance MAY support the packaged skill, but they MUST NOT be
+required at runtime after skill installation unless the installation contract is
+explicitly changed.
+
+Path language MUST match the active scope. Repo-root docs and commands use
+paths such as `gh-address-cr/scripts/cli.py`; skill-owned docs use paths such
+as `scripts/cli.py`, `references/...`, and `agents/openai.yaml`.
+
+Rationale: The project ships a skill. Blurring repo-root and skill-root paths
+creates broken installed instructions and unstable agent behavior.
+
+### V. Testable Contracts And Fail-Fast Changes
+
+Public behavior changes MUST update code, docs, and executable tests together.
+The project MUST fail fast on missing tools, malformed producer output, invalid
+handoff formats, unsafe resolve-only handling, and unsupported public command
+usage. Silent fallbacks, hidden compatibility shims, alternate prompt contracts,
+and narrative-only findings ingestion are forbidden unless they are explicitly
+documented, tested, and versioned as public behavior.
+
+Rationale: Agent workflows amplify ambiguity. A weak fallback can create false
+completion claims, duplicate side effects, or unrecoverable session drift.
+
+## Runtime Architecture
+
+The intended architecture is:
+
+- Core engine: deterministic state machine, GitHub IO, findings normalization,
+  session persistence, loop safety, final gate, audit artifacts, and telemetry.
+- CLI: stable public interface for agents, humans, CI, and future automation.
+- Agent contract: structured action requests and structured action responses
+  for `fix`, `clarify`, and `defer` workflows.
+- Skill: thin usage adapter that tells an AI agent when to invoke the CLI and
+  how to react to machine-readable statuses.
+- External producers: replaceable review sources that emit normalized findings
+  JSON or fixed `finding` blocks.
+
+The CLI control plane is authoritative. Agent reasoning MAY decide how to fix,
+clarify, or defer a specific item, but the CLI MUST own session transitions,
+GitHub writes, reply/resolve ordering, and final-gate evaluation.
+
+## Development Workflow And Quality Gates
+
+All non-trivial changes MUST begin by reading the smallest governing contract:
+the relevant tests, `README.md`, `gh-address-cr/SKILL.md`, or this constitution.
+Feature specs MUST identify whether they affect the public CLI, the packaged
+skill payload, agent-facing instructions, session state, GitHub side effects,
+findings intake, telemetry, or final-gate behavior.
+
+Implementation plans MUST include a Constitution Check covering:
+
+- control-plane ownership of state and side effects
+- public CLI and machine summary compatibility
+- evidence requirements for reply, resolve, and final-gate behavior
+- packaged skill boundary and path discipline
+- test coverage for changed contracts
+
+Code changes MUST run the smallest verification that matches the scope. Public
+CLI or packaging changes MUST include CLI smoke tests. Session, loop, reply,
+resolve, or final-gate changes MUST include behavior tests. Documentation-only
+changes MUST still be checked for repo-root versus skill-root path correctness
+and public contract consistency.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution governs architecture and product-contract decisions for this
+repository. It complements `AGENTS.md`, which governs day-to-day agent behavior
+inside the source repository. When this constitution conflicts with lower-level
+templates, examples, or reference prose, the lower-level artifact MUST be
+updated rather than silently blended.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+Amendments MUST include:
+
+- the reason for the change
+- the version bump rationale
+- affected principles or sections
+- dependent templates or runtime guidance reviewed
+- verification performed
+
+Versioning follows semantic versioning:
+
+- MAJOR: incompatible governance changes, removed principles, or redefined
+  public architecture boundaries
+- MINOR: new principles, new sections, or materially expanded governance
+- PATCH: clarifications, wording improvements, typo fixes, or non-semantic
+  refinements
+
+Every implementation plan, task set, and completion claim MUST review
+constitution compliance. A feature that violates a principle MUST document the
+violation, why it is necessary, and the simpler compliant alternative that was
+rejected.
+
+**Version**: 1.0.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-04-24

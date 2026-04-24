@@ -2,6 +2,10 @@
 
 An auditable PR-session workflow skill for AI coding agents.
 
+Project architecture governance lives in `.specify/memory/constitution.md`.
+The installed skill contract remains `gh-address-cr/SKILL.md`; keep
+repo-root governance and packaged-skill instructions in their own scopes.
+
 It now treats a Pull Request as the session root and can ingest both:
 
 - GitHub review threads

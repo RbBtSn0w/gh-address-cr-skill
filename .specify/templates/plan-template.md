@@ -31,7 +31,19 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- **Control plane ownership**: Does the plan keep runtime state, GitHub side
+  effects, reply evidence, loop safety, and final-gate evaluation inside
+  deterministic code instead of Markdown instructions?
+- **Public CLI contract**: Does the plan preserve or explicitly version the
+  `review` entrypoint, high-level command semantics, machine summary fields,
+  reason codes, wait states, exit codes, and cache artifact contracts?
+- **Evidence-first handling**: Does the plan define how review items are
+  verified, classified as `fix` / `clarify` / `defer` / `reject`, replied to,
+  resolved, and proven by `final-gate`?
+- **Packaged skill boundary**: Does the plan keep installable-skill behavior
+  under `gh-address-cr/` and use repo-root paths only in repo-root docs/tests?
+- **Fail-fast verification**: Does the plan include tests or smoke checks for
+  each changed public behavior, parser, session transition, or CLI surface?
 
 ## Project Structure
 
