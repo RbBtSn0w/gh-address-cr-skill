@@ -39,6 +39,13 @@ compare:
 
 Failure output must be machine-readable and must occur before session mutation.
 
+## Runtime Tool Preflight
+
+Before any command performs PR inspection, GitHub review-state lookup, reply
+posting, or thread resolution, the runtime must verify that `gh` is available
+and authenticated. Missing or unusable `gh` must produce a machine-readable
+failure before session mutation or GitHub side effects.
+
 ## Proposed Advanced/Internal Protocol Commands
 
 These commands are implementation-planning contracts. They remain
@@ -51,6 +58,55 @@ gh-address-cr agent submit <owner/repo> <pr_number> --input <response.json>
 gh-address-cr agent leases <owner/repo> <pr_number>
 gh-address-cr agent reclaim <owner/repo> <pr_number>
 ```
+
+## `agent manifest`
+
+Purpose: emit the runtime-supported capability manifest used to decide role,
+action, format, protocol-version, and maximum parallel-claim eligibility before
+leases are issued.
+
+Output:
+
+```json
+{
+  "status": "MANIFEST_READY",
+  "schema_version": "1.0",
+  "runtime_version": "1.0.0",
+  "supported_protocol_versions": ["1.0"],
+  "roles": [
+    "coordinator",
+    "review_producer",
+    "triage",
+    "fixer",
+    "verifier",
+    "publisher",
+    "gatekeeper"
+  ],
+  "actions": [
+    "review",
+    "produce_findings",
+    "triage",
+    "fix",
+    "clarify",
+    "defer",
+    "reject",
+    "verify",
+    "publish",
+    "gate"
+  ],
+  "input_formats": ["action_request.v1"],
+  "output_formats": ["action_response.v1"],
+  "constraints": {
+    "max_parallel_claims": 2
+  }
+}
+```
+
+Exit codes:
+
+- `0`: manifest emitted
+- `2`: manifest generation failed
+- `5`: runtime or protocol compatibility failure
 
 ## `agent next`
 
@@ -99,7 +155,8 @@ Exit codes:
 
 - `0`: response accepted
 - `2`: malformed response
-- `5`: stale lease, missing evidence, or unsafe side effect claim
+- `5`: stale lease, missing evidence, verifier rejection, or unsafe side effect
+  claim
 
 ## `agent leases`
 

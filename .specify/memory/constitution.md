@@ -1,28 +1,32 @@
 <!--
 Sync Impact Report
-Version change: template -> 1.0.0
+Version change: 1.0.0 -> 1.0.1
+Amendment reason:
+- Align Runtime Architecture action list with Principle III and feature contracts by adding `reject`.
+Version bump rationale:
+- PATCH clarification only; no public boundary, principle, or workflow contract redefinition.
 Modified principles:
-- Placeholder Principle 1 -> I. Control Plane Owns Runtime State
-- Placeholder Principle 2 -> II. CLI Is The Stable Public Interface
-- Placeholder Principle 3 -> III. Evidence-First Review Handling
-- Placeholder Principle 4 -> IV. Packaged Skill Boundary Is Explicit
-- Placeholder Principle 5 -> V. Testable Contracts And Fail-Fast Changes
-Added sections:
+- None
+Affected sections:
 - Runtime Architecture
-- Development Workflow And Quality Gates
+Added sections:
+- None
 Removed sections:
 - None
 Templates requiring updates:
-- .specify/templates/plan-template.md: updated
-- .specify/templates/spec-template.md: updated
-- .specify/templates/tasks-template.md: updated
-- .specify/templates/checklist-template.md: updated
-- .specify/templates/commands/*.md: not present
+- .specify/templates/plan-template.md: reviewed, no update required
+- .specify/templates/spec-template.md: reviewed, no update required
+- .specify/templates/tasks-template.md: reviewed, no update required
+- .specify/templates/checklist-template.md: reviewed, no update required
 Runtime guidance requiring updates:
-- AGENTS.md: updated
-- README.md: updated
+- AGENTS.md: reviewed, no update required
+- README.md: reviewed, no update required
 - gh-address-cr/agents/openai.yaml: reviewed, no update required
-Follow-up TODOs:
+Verification performed:
+- `.specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks`
+- task ID sequence check for `specs/001-agent-control-plane/tasks.md`
+- `git diff --check`
+Follow-up items:
 - None
 -->
 # GH Address CR Constitution
@@ -105,15 +109,15 @@ The intended architecture is:
   session persistence, loop safety, final gate, audit artifacts, and telemetry.
 - CLI: stable public interface for agents, humans, CI, and future automation.
 - Agent contract: structured action requests and structured action responses
-  for `fix`, `clarify`, and `defer` workflows.
+  for `fix`, `clarify`, `defer`, and `reject` workflows.
 - Skill: thin usage adapter that tells an AI agent when to invoke the CLI and
   how to react to machine-readable statuses.
 - External producers: replaceable review sources that emit normalized findings
   JSON or fixed `finding` blocks.
 
 The CLI control plane is authoritative. Agent reasoning MAY decide how to fix,
-clarify, or defer a specific item, but the CLI MUST own session transitions,
-GitHub writes, reply/resolve ordering, and final-gate evaluation.
+clarify, defer, or reject a specific item, but the CLI MUST own session
+transitions, GitHub writes, reply/resolve ordering, and final-gate evaluation.
 
 ## Development Workflow And Quality Gates
 
@@ -166,4 +170,4 @@ constitution compliance. A feature that violates a principle MUST document the
 violation, why it is necessary, and the simpler compliant alternative that was
 rejected.
 
-**Version**: 1.0.0 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-04-24
+**Version**: 1.0.1 | **Ratified**: 2026-04-24 | **Last Amended**: 2026-04-24

@@ -70,19 +70,36 @@ Minimum JSON-compatible shape:
   "allowed_actions": ["fix", "clarify", "defer", "reject"],
   "required_evidence": ["note", "files", "validation_commands"],
   "forbidden_actions": ["post_github_reply", "resolve_github_thread"],
-  "resume_command": "gh-address-cr submit-action <loop-request> ..."
+  "resume_command": "gh-address-cr agent submit owner/repo 123 --input response.json"
 }
 ```
 
 Rules:
 
-- `request_id`, `session_id`, `lease_id`, `agent_role`, `item`, and
-  `allowed_actions` are required.
+- `request_id`, `session_id`, `lease_id`, `agent_role`, `item`,
+  `allowed_actions`, and `required_evidence` are required.
 - Mutating requests must include an active lease.
 - `forbidden_actions` must include direct GitHub reply and resolve operations
   for AI-agent roles.
 - Skill-local shims must not appear as the authoritative runtime in
   `resume_command`; they may only be compatibility fallbacks.
+
+## Pre-Fix Classification Gate
+
+The coordinator must record classification evidence before issuing a mutating
+fixer request or accepting code-modifying evidence.
+
+Rules:
+
+- Every item must be classified as `fix`, `clarify`, `defer`, or `reject`.
+- Mutating fixer requests require a prior `classification_recorded` evidence
+  record for the same item.
+- Missing or stale classification evidence blocks fixer leases, appends
+  `request_rejected` or `response_rejected` evidence, and does not mutate
+  files, terminal item state, or GitHub state.
+- Classifications that produce `clarify`, `defer`, or `reject` are terminal
+  handling decisions unless a later verifier or maintainer record reopens the
+  item with explicit rationale.
 
 ## ActionResponse
 
@@ -150,6 +167,7 @@ The control plane must reject an `ActionResponse` when:
 - the lease belongs to another agent and has not been transferred
 - the response hash does not match the issued request context
 - required evidence is missing
+- a code-modifying response lacks prior classification evidence
 
 ## Item Independence
 
@@ -177,6 +195,10 @@ The coordinator may issue:
 
 The publisher and gatekeeper roles are deterministic CLI roles, not AI-agent
 roles.
+
+When a verifier rejects fixer evidence, the coordinator must append a
+`verification_rejected` evidence record, return the item to a blocked or open
+state, and avoid GitHub reply or resolve side effects.
 
 ## Final Gate Scope
 

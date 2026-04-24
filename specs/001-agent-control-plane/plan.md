@@ -31,7 +31,7 @@ Phase 1
 user cache directory; JSON for current state, JSONL for append-only evidence,
 audit, and trace records  
 **Testing**: `python3 -m unittest discover -s tests`, CLI smoke checks, focused
-contract tests for schemas and lease validation; `ruff check gh-address-cr
+contract tests for schemas and lease validation; `ruff check gh-address-cr src
 tests` for CI-equivalent linting  
 **Target Platform**: Local developer or CI environment with Python 3.10+ and
 authenticated `gh` CLI  
@@ -128,9 +128,15 @@ src/
         └── audit.py
 
 tests/
+├── fixtures/
+│   ├── action_protocol/
+│   └── github_threads/
 ├── test_agent_protocol.py
 ├── test_claim_leases.py
 ├── test_control_plane_workflow.py
+├── test_evidence_ledger.py
+├── test_final_gate.py
+├── test_findings_intake.py
 ├── test_runtime_packaging.py
 ├── test_skill_runtime_shim.py
 ├── test_python_wrappers.py
@@ -225,6 +231,8 @@ The plan explicitly covers the high-risk checklist gaps:
   `runtime-requirements.json`
 - final-gate scope includes unresolved threads, pending reviews, session
   blocking items, missing reply evidence, and validation evidence
+- mutating fixer requests require recorded triage/classification evidence before
+  code-changing work is issued or accepted
 - `CapabilityManifest` controls role/action eligibility before leases are issued
 - `ClaimLease` has an explicit lifecycle and reclaim path
 - parallel item processing requires distinct work item IDs plus no known file or

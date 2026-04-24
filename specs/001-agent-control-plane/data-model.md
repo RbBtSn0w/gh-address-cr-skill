@@ -40,6 +40,8 @@ Fields:
 - `state`: `open`, `claimed`, `fixed`, `clarified`, `deferred`, `rejected`,
   `needs_human`, or `closed`
 - `allowed_actions`: allowed actions for this item
+- `classification_evidence`: optional recorded triage decision and rationale
+  proving the item was classified before mutating work
 - `conflict_keys`: optional file paths, remote thread ids, or side-effect
   targets used to prevent unsafe parallel claims
 - `reply_evidence`: optional durable reply URL and author login
@@ -184,8 +186,11 @@ Fields:
 - `agent_id`
 - `role`
 - `event_type`: `request_issued`, `response_submitted`,
-  `response_accepted`, `response_rejected`, `reply_posted`,
-  `thread_resolved`, `validation_recorded`, `gate_passed`, or `gate_failed`
+  `request_rejected`, `response_accepted`, `response_rejected`,
+  `lease_created`, `lease_submitted`, `lease_accepted`, `lease_rejected`,
+  `lease_expired`, `lease_released`, `reply_posted`,
+  `classification_recorded`, `verification_rejected`, `thread_resolved`,
+  `validation_recorded`, `gate_passed`, or `gate_failed`
 - `payload`
 - `payload_hash`
 
@@ -193,6 +198,10 @@ Validation rules:
 
 - Records are append-only
 - Side-effect records must include durable external identifiers where available
+- Mutating fixer requests require prior `classification_recorded` evidence
+- Missing classification may append `request_rejected` or `response_rejected`
+  evidence, but must not create an active fixer lease, mutate files, mark an
+  item terminal, or perform GitHub side effects
 - Final completion requires a fresh `gate_passed` record
 - Rejected responses, expired leases, exhausted retry budgets, and runtime
   compatibility failures must be recorded

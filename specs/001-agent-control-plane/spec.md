@@ -17,7 +17,7 @@ As a developer or automation system, I want to initiate a review session via a d
 
 **Acceptance Scenarios**:
 
-1. **Given** a PR URL with open review threads, **When** I run the review command, **Then** the system fetches, parses, and normalizes the findings into a machine-readable format.
+1. **Given** a repository identifier and PR number with open review threads, **When** I run the review command, **Then** the system fetches, parses, and normalizes the findings into a machine-readable format.
 2. **Given** the system has parsed findings, **When** processing begins, **Then** it emits a structured `ActionRequest` for the next pending item.
 3. **Given** the packaged skill is installed, **When** the deterministic CLI/runtime is missing, **Then** the skill adapter fails loudly with installation guidance instead of silently running an embedded copy of the control plane.
 
@@ -25,7 +25,7 @@ As a developer or automation system, I want to initiate a review session via a d
 
 ### User Story 2 - Agentic Resolution Loop (Priority: P1)
 
-As an AI agent, I want to receive a structured `ActionRequest` and return an `ActionResponse` so that I can focus solely on code fixes, clarification, or deferral without worrying about GitHub IO or state management.
+As an AI agent, I want to receive a structured `ActionRequest` and return an `ActionResponse` so that I can focus solely on code fixes, clarification, deferral, or rejection without worrying about GitHub IO or state management.
 
 **Why this priority**: This separates the cognitive work from the side-effect work, ensuring the agent's actions are cleanly scoped and deterministic.
 
@@ -35,6 +35,7 @@ As an AI agent, I want to receive a structured `ActionRequest` and return an `Ac
 
 1. **Given** an `ActionRequest` for a code issue, **When** the agent acts, **Then** it returns an `ActionResponse` specifying a "fix" action and provides code modifications as evidence.
 2. **Given** an `ActionRequest` that is ambiguous, **When** the agent evaluates it, **Then** it returns a "clarify" action with an explanation as evidence.
+3. **Given** a review item has not been classified as `fix`, `clarify`, `defer`, or `reject`, **When** a fixer agent requests mutating work, **Then** the control plane blocks the request before code mutation and records rejected-request evidence explaining the missing classification.
 
 ---
 
@@ -114,7 +115,7 @@ As a skill maintainer, I want the control-plane runtime to live outside the pack
 
 ### Functional Requirements
 
-- **FR-001**: System MUST provide a CLI entrypoint for initializing a review session (`gh-address-cr review <PR_URL>`).
+- **FR-001**: System MUST provide a CLI entrypoint for initializing a review session (`gh-address-cr review <owner/repo> <pr_number>`).
 - **FR-002**: System MUST convert GitHub PR threads and review comments into a normalized, deterministic data structure.
 - **FR-003**: System MUST define and emit a structured `ActionRequest` schema for agents to consume.
 - **FR-004**: System MUST accept a structured `ActionResponse` schema from agents indicating the action (`fix`, `clarify`, `defer`, `reject`) and providing necessary evidence.
@@ -122,7 +123,7 @@ As a skill maintainer, I want the control-plane runtime to live outside the pack
 - **FR-006**: System MUST perform all GitHub side-effects (replying, resolving) deterministically based on the `ActionResponse` and ledger, completely hiding the GitHub API from the agent.
 - **FR-007**: System MUST provide a `ResumeToken` or session ID allowing resumption of an interrupted PR review loop without redundant operations.
 - **FR-008**: System MUST enforce a Final Gate that verifies 0 unresolved remote threads, 0 current-login pending reviews, 0 session blocking items, no terminal GitHub thread missing durable reply evidence, and required validation evidence before allowing a completion state.
-- **FR-009**: System MUST prevent "resolve-only" actions without accompanying evidence of a fix, clarification, or deferral.
+- **FR-009**: System MUST prevent "resolve-only" actions without accompanying evidence of a fix, clarification, deferral, or rejection.
 - **FR-010**: System MUST define specialized multi-agent roles for coordinator, review producer, triage, fixer, verifier, GitHub publisher, and final gate.
 - **FR-011**: System MUST issue item-scoped claim leases so parallel agents cannot mutate the same work item concurrently.
 - **FR-012**: System MUST record each agent role, lease, action request, action response, validation result, and side effect in the evidence ledger.
@@ -139,6 +140,7 @@ As a skill maintainer, I want the control-plane runtime to live outside the pack
 - **FR-023**: System MUST define item independence for parallel processing using distinct work item IDs, compatible active leases, and no known conflicting file or side-effect ownership.
 - **FR-024**: System MUST define the claim lease lifecycle across creation, active ownership, submission, acceptance, rejection, expiry, release, and reclaiming.
 - **FR-025**: System MUST define bounded retry, blocking, and evidence-recording behavior for transient GitHub API failures such as rate limits without emitting duplicate side effects.
+- **FR-026**: System MUST require recorded triage/classification evidence before issuing any mutating fixer request or accepting code-modifying evidence.
 
 ### Constitution Alignment *(mandatory)*
 
@@ -152,7 +154,7 @@ As a skill maintainer, I want the control-plane runtime to live outside the pack
 
 - **ReviewSession**: Represents the overall state of addressing a PR's review threads, containing the ledger and resume token.
 - **ActionRequest**: The structured payload given to the AI containing the context, the specific thread/finding, and available actions.
-- **ActionResponse**: The structured payload returned by the AI containing the chosen action (`fix`, `clarify`, `defer`) and the required evidence.
+- **ActionResponse**: The structured payload returned by the AI containing the chosen action (`fix`, `clarify`, `defer`, `reject`) and the required evidence.
 - **EvidenceLedger**: An append-only log of actions taken, ensuring auditability and resumability.
 - **AgentRole**: A named responsibility boundary for one agent in the workflow, such as coordinator, review producer, triage, fixer, verifier, publisher, or gatekeeper.
 - **ClaimLease**: An item-scoped ownership record that allows one agent to work on one item for a bounded period.
@@ -167,8 +169,8 @@ As a skill maintainer, I want the control-plane runtime to live outside the pack
 
 ### Measurable Outcomes
 
-- **SC-001**: The CLI successfully parses 100% of standard GitHub PR threads into normalized findings without agent intervention.
-- **SC-002**: A supported AI agent can process `ActionRequest` payloads and return valid `ActionResponse` payloads 95% of the time without syntax errors.
+- **SC-001**: The CLI successfully parses 100% of the repository's standard GitHub PR thread fixture corpus into normalized findings without agent intervention.
+- **SC-002**: A supported AI agent can process a scripted fixture corpus of at least 20 representative `ActionRequest` payloads across `fix`, `clarify`, `defer`, and `reject`, returning schema-valid `ActionResponse` payloads at least 95% of the time without syntax errors.
 - **SC-003**: A fully interrupted session can be resumed from the exact state 100% of the time using the `EvidenceLedger` and `ResumeToken` without re-evaluating completed threads.
 - **SC-004**: The final gate command reliably exits with a non-zero code if any remote thread remains unresolved, any terminal thread lacks reply evidence, any current-login review remains pending, or any session blocking item remains open.
 - **SC-005**: In a simulated parallel run with at least 3 independent items and 3 agent roles, 100% of accepted submissions match an active claim lease and no duplicate GitHub side effects are emitted.
