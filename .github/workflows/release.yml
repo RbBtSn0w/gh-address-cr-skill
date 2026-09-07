@@ -68,7 +68,7 @@ jobs:
         if: steps.publish-target.outputs.target == 'pypi'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release
+        run: npx --yes semantic-release
 
       - name: Prepare staging package version
         if: steps.publish-target.outputs.target != 'pypi'

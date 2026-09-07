@@ -1,0 +1,36 @@
+name: Sync main to develop
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync:
+    name: Sync main back to develop
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Mint bot token
+        id: bot
+        if: ${{ vars.RELEASE_BOT_APP_ID != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          token: ${{ steps.bot.outputs.token || secrets.GITHUB_TOKEN }}
+
+      - name: Merge main into develop
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge origin/main --no-edit -m "chore(repo): sync main to develop [skip ci]"
+          git push origin develop

@@ -8,7 +8,14 @@ const releaseParserOpts = {
 };
 
 module.exports = {
-  branches: ["main"],
+  branches: [
+    "main",
+    {
+      name: "develop",
+      channel: "beta",
+      prerelease: "beta",
+    },
+  ],
   repositoryUrl: "https://github.com/RbBtSn0w/gh-address-cr.git",
   tagFormat: "v${version}",
   plugins: [

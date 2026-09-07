@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - develop
       - fix/**
   schedule:
     - cron: "0 3 * * 1"
@@ -108,7 +109,10 @@ jobs:
   pr-dev-preview:
     name: Publish PR Dev Preview
     needs: lint-and-test
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref != 'develop'
     concurrency:
       group: pr-dev-preview-${{ github.event.pull_request.number }}
       cancel-in-progress: true
