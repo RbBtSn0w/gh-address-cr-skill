@@ -1,3 +1,9 @@
+## [3.15.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.14.0...v3.15.0) (2026-09-07)
+
+### Features
+
+* **ci:** adopt dual-branch release train with scheduled friday releases ([b083d6b](https://github.com/RbBtSn0w/gh-address-cr/commit/b083d6b0e04cef937cc63093f74acff330c75216))
+
 ## [3.14.0](https://github.com/RbBtSn0w/gh-address-cr/compare/v3.13.1...v3.14.0) (2026-09-04)
 
 ### Features
